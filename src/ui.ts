@@ -28,7 +28,7 @@ function formatCaptainsLog(status: StatusMessage, formatter: PlatformAdapter["fo
   const totalTokens = status.inputTokens + status.outputTokens;
   const tokenDisplay = totalTokens > 0 ? ` · ${formatTokens(totalTokens)} tokens` : "";
 
-  let text = `<b>Claude</b> · ${duration}${tokenDisplay}${pauseIndicator}\n\n`;
+  let text = `<b>Claudine</b> · ${duration}${tokenDisplay}${pauseIndicator}\n\n`;
 
   for (const entry of status.entries) {
     const detailsText = entry.details ? ` ${formatter.escape(entry.details)}` : "";
@@ -231,7 +231,7 @@ export async function finalizeStatusMessage(
   const statusIcon = success ? "✅" : "❌";
   const totalTokens = status.inputTokens + status.outputTokens;
   const tokenDisplay = totalTokens > 0 ? ` · ${formatTokens(totalTokens)} tokens` : "";
-  let text = `<b>Claude</b> · ${duration}${tokenDisplay} ${statusIcon}\n\n`;
+  let text = `<b>Claudine</b> · ${duration}${tokenDisplay} ${statusIcon}\n\n`;
 
   for (const e of status.entries) {
     const detailsText = e.details ? ` ${adapter.formatter.escape(e.details)}` : "";
