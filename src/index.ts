@@ -21,14 +21,20 @@ process.env.PATH = `/usr/bin:/usr/local/bin:${process.env.PATH || ""}`;
 
 function loadConfig(): BotConfig {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const allowedChatId = process.env.TELEGRAM_CHAT_ID;
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY || "";
   const workingDir = process.env.WORKING_DIR || process.cwd();
+
+  // Parse allowed chat IDs - supports both old single ID and new comma-separated format
+  const rawChatIds = process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID || "";
+  const allowedChatIds = rawChatIds
+    .split(",")
+    .map(id => id.trim())
+    .filter(Boolean);
 
   // Validate required environment variables
   const missing: string[] = [];
   if (!botToken) missing.push("TELEGRAM_BOT_TOKEN");
-  if (!allowedChatId) missing.push("TELEGRAM_CHAT_ID");
+  if (allowedChatIds.length === 0) missing.push("TELEGRAM_CHAT_IDS (or TELEGRAM_CHAT_ID)");
   // ANTHROPIC_API_KEY is optional - SDK can use CLI auth
 
   if (missing.length > 0) {
@@ -39,7 +45,7 @@ function loadConfig(): BotConfig {
 
   return {
     botToken: botToken!,
-    allowedChatId: allowedChatId!,
+    allowedChatIds,
     anthropicApiKey: anthropicApiKey!,
     workingDir,
   };

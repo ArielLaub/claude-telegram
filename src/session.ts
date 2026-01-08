@@ -10,6 +10,7 @@ import {
   StoredSession,
   SessionHistory,
   ChatState,
+  VerbosityLevel,
   MAX_STORED_SESSIONS,
 } from "./types.js";
 
@@ -106,6 +107,7 @@ export function getChatState(chatId: number): ChatState {
     chatStates.set(chatId, {
       planMode: false,
       autoApprovedTools: new Set(),
+      verbosity: "normal",
     });
   }
   return chatStates.get(chatId)!;
@@ -113,9 +115,11 @@ export function getChatState(chatId: number): ChatState {
 
 /** Reset chat state (for /new command) */
 export function resetChatState(chatId: number): void {
+  const currentVerbosity = chatStates.get(chatId)?.verbosity || "normal";
   chatStates.set(chatId, {
     planMode: false,
     autoApprovedTools: new Set(),
+    verbosity: currentVerbosity,  // Preserve verbosity across sessions
   });
 }
 
@@ -174,4 +178,14 @@ export function setFirstMessage(chatId: number, message: string): void {
 /** Get first message for session preview */
 export function getFirstMessage(chatId: number): string | undefined {
   return getChatState(chatId).firstMessage;
+}
+
+/** Set verbosity level for a chat */
+export function setVerbosity(chatId: number, level: VerbosityLevel): void {
+  getChatState(chatId).verbosity = level;
+}
+
+/** Get verbosity level for a chat */
+export function getVerbosity(chatId: number): VerbosityLevel {
+  return getChatState(chatId).verbosity || "normal";
 }

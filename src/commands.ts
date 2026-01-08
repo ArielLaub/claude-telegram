@@ -10,7 +10,7 @@ import { promisify } from "util";
 import * as os from "os";
 import * as fs from "fs";
 import * as https from "https";
-import { COMMANDS, Command } from "./types.js";
+import { COMMANDS, Command, VerbosityLevel } from "./types.js";
 import * as session from "./session.js";
 import * as queue from "./queue.js";
 import * as ui from "./ui.js";
@@ -522,6 +522,65 @@ export async function handleStart(bot: TelegramBot, chatId: number): Promise<boo
   return true;
 }
 
+export async function handleVerbose(
+  bot: TelegramBot,
+  chatId: number,
+  level?: string
+): Promise<boolean> {
+  const currentLevel = session.getVerbosity(chatId);
+
+  // Show current level if no argument
+  if (!level || level.trim() === "") {
+    const descriptions: Record<VerbosityLevel, string> = {
+      low: "Minimal output - just final results",
+      normal: "Default - file names, tool actions",
+      high: "Verbose - code diffs, command outputs",
+    };
+
+    await ui.sendMessage(
+      bot,
+      chatId,
+      `<b>Verbosity Level:</b> ${currentLevel}\n` +
+        `<i>${descriptions[currentLevel]}</i>\n\n` +
+        `Usage:\n` +
+        `<code>/verbose low</code> - minimal output\n` +
+        `<code>/verbose normal</code> - default\n` +
+        `<code>/verbose high</code> - show details`,
+      { parse_mode: "HTML" }
+    );
+    return true;
+  }
+
+  // Parse the new level
+  const newLevel = level.trim().toLowerCase();
+  if (newLevel !== "low" && newLevel !== "normal" && newLevel !== "high") {
+    await ui.sendMessage(
+      bot,
+      chatId,
+      `Invalid verbosity level: <code>${ui.escapeHtml(level)}</code>\n` +
+        `Valid options: <code>low</code>, <code>normal</code>, <code>high</code>`,
+      { parse_mode: "HTML" }
+    );
+    return true;
+  }
+
+  session.setVerbosity(chatId, newLevel as VerbosityLevel);
+
+  const icons: Record<VerbosityLevel, string> = {
+    low: "🔕",
+    normal: "🔔",
+    high: "🔊",
+  };
+
+  await ui.sendMessage(
+    bot,
+    chatId,
+    `${icons[newLevel as VerbosityLevel]} Verbosity set to <b>${newLevel}</b>`,
+    { parse_mode: "HTML" }
+  );
+  return true;
+}
+
 // ============================================================================
 // Telegram Menu Registration
 // ============================================================================
@@ -590,6 +649,8 @@ export async function routeCommand(
       return handleStats(bot, chatId);
     case "/usage":
       return handleUsage(bot, chatId);
+    case "/verbose":
+      return handleVerbose(bot, chatId, args);
     case "/restart":
       return handleRestart(bot, chatId);
     default:

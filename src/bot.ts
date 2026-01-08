@@ -35,7 +35,7 @@ export class ClaudineBot {
 
   /** Check if a chat is allowed */
   private isAllowed(chatId: number): boolean {
-    return chatId.toString() === this.config.allowedChatId;
+    return this.config.allowedChatIds.includes(chatId.toString());
   }
 
   /** Handle incoming messages */
@@ -207,15 +207,17 @@ export class ClaudineBot {
   start(): void {
     console.log("Claudine Telegram Bot started!");
     console.log(`Working directory: ${this.config.workingDir}`);
-    console.log(`Allowed chat ID: ${this.config.allowedChatId}`);
+    console.log(`Allowed chat IDs: ${this.config.allowedChatIds.join(", ")}`);
 
     // Register bot commands with Telegram menu
     commands.registerBotCommands(this.bot);
 
-    // Send startup message
-    this.bot.sendMessage(this.config.allowedChatId, "Claudine is online").catch((err) => {
-      console.error("Failed to send startup message:", err);
-    });
+    // Send startup message to all allowed chats
+    for (const chatId of this.config.allowedChatIds) {
+      this.bot.sendMessage(chatId, "Claudine is online").catch((err) => {
+        console.error(`Failed to send startup message to ${chatId}:`, err);
+      });
+    }
   }
 
   /** Stop the bot */

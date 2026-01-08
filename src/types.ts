@@ -107,12 +107,16 @@ export interface Command {
 // Chat State Types
 // ============================================================================
 
+/** Verbosity levels for tool output */
+export type VerbosityLevel = "low" | "normal" | "high";
+
 /** Per-chat state tracking */
 export interface ChatState {
   sessionId?: string;
   planMode: boolean;
   autoApprovedTools: Set<string>;
   firstMessage?: string;
+  verbosity: VerbosityLevel;
 }
 
 // ============================================================================
@@ -122,7 +126,7 @@ export interface ChatState {
 /** Bot configuration from environment */
 export interface BotConfig {
   botToken: string;
-  allowedChatId: string;
+  allowedChatIds: string[];  // Supports multiple users
   workingDir: string;
   anthropicApiKey: string;
 }
@@ -178,5 +182,6 @@ export const COMMANDS: Command[] = [
   { command: "/help", description: "Show this help message", category: "system" },
   { command: "/stats", description: "Show system stats (CPU, memory, temp)", category: "system" },
   { command: "/usage", description: "Show Claude API usage limits", category: "system" },
+  { command: "/verbose", description: "Set verbosity level (low/normal/high)", category: "system" },
   { command: "/restart", description: "Restart the bot", category: "system" },
 ];

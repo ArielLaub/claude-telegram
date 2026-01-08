@@ -12,6 +12,7 @@ import {
   Question,
   PendingQuestion,
   PendingApproval,
+  VerbosityLevel,
   SENSITIVE_TOOLS,
   PLAN_MODE_TOOLS,
   ALL_TOOLS,
@@ -121,43 +122,94 @@ function formatActionsSummary(actions: string[]): string {
 interface ToolAction {
   icon: string;
   action: string;
+  skip?: boolean;  // If true, don't show this action in the log
 }
 
-/** Format tool action with detailed description */
-function formatToolAction(toolName: string, input: Record<string, unknown>): ToolAction {
+/** Tools that are skipped in low verbosity mode */
+const LOW_VERBOSITY_SKIP_TOOLS = ["Read", "Glob", "Grep"];
+
+/** Format tool action with detailed description based on verbosity level */
+function formatToolAction(
+  toolName: string,
+  input: Record<string, unknown>,
+  verbosity: VerbosityLevel
+): ToolAction {
+  // Low verbosity: skip read-only tools entirely
+  if (verbosity === "low" && LOW_VERBOSITY_SKIP_TOOLS.includes(toolName)) {
+    return { icon: "", action: "", skip: true };
+  }
+
   switch (toolName) {
     case "Bash": {
       const desc = input.description as string | undefined;
       const cmd = input.command as string | undefined;
+
+      if (verbosity === "low") {
+        // Minimal output
+        return { icon: "🔧", action: "Running command" };
+      }
+      if (verbosity === "high" && cmd) {
+        // Show full command
+        const truncCmd = cmd.length > 80 ? cmd.substring(0, 80) + "..." : cmd;
+        return { icon: "🔧", action: `$ ${truncCmd}` };
+      }
+      // Normal verbosity
       if (desc) {
         return { icon: "🔧", action: desc };
       }
       if (cmd) {
-        return { icon: "🔧", action: `Running: ${cmd}` };
+        const shortCmd = cmd.split(" ")[0]; // Just the command name
+        return { icon: "🔧", action: `Running: ${shortCmd}` };
       }
       return { icon: "🔧", action: "Executing command..." };
     }
 
     case "Read": {
       const path = input.file_path as string | undefined;
+      if (verbosity === "high" && path) {
+        const lines = input.limit as number | undefined;
+        const lineInfo = lines ? ` (${lines} lines)` : "";
+        return { icon: "📖", action: `Reading: ${path}${lineInfo}` };
+      }
       if (path) {
-        return { icon: "📖", action: `Reading ${path}` };
+        // Normal: just the filename
+        const filename = path.split("/").pop() || path;
+        return { icon: "📖", action: `Reading ${filename}` };
       }
       return { icon: "📖", action: "Reading file..." };
     }
 
     case "Write": {
       const path = input.file_path as string | undefined;
+      if (verbosity === "low") {
+        return { icon: "✏️", action: "Writing file" };
+      }
       if (path) {
-        return { icon: "✏️", action: `Writing ${path}` };
+        const filename = path.split("/").pop() || path;
+        return { icon: "✏️", action: `Writing ${filename}` };
       }
       return { icon: "✏️", action: "Writing file..." };
     }
 
     case "Edit": {
       const path = input.file_path as string | undefined;
+      if (verbosity === "low") {
+        return { icon: "✏️", action: "Editing file" };
+      }
+      if (verbosity === "high" && path) {
+        const oldStr = input.old_string as string | undefined;
+        const newStr = input.new_string as string | undefined;
+        const filename = path.split("/").pop() || path;
+        if (oldStr && newStr) {
+          const oldPreview = oldStr.length > 30 ? oldStr.substring(0, 30) + "..." : oldStr;
+          const newPreview = newStr.length > 30 ? newStr.substring(0, 30) + "..." : newStr;
+          return { icon: "✏️", action: `Edit ${filename}:\n"${oldPreview}"\n→ "${newPreview}"` };
+        }
+        return { icon: "✏️", action: `Editing ${filename}` };
+      }
       if (path) {
-        return { icon: "✏️", action: `Editing ${path}` };
+        const filename = path.split("/").pop() || path;
+        return { icon: "✏️", action: `Editing ${filename}` };
       }
       return { icon: "✏️", action: "Editing file..." };
     }
@@ -165,11 +217,11 @@ function formatToolAction(toolName: string, input: Record<string, unknown>): Too
     case "Glob": {
       const pattern = input.pattern as string | undefined;
       const path = input.path as string | undefined;
-      if (pattern && path) {
-        return { icon: "🔍", action: `Finding ${pattern} in ${path}` };
+      if (verbosity === "high" && pattern && path) {
+        return { icon: "🔍", action: `Glob: ${pattern} in ${path}` };
       }
       if (pattern) {
-        return { icon: "🔍", action: `Finding files: ${pattern}` };
+        return { icon: "🔍", action: `Finding: ${pattern}` };
       }
       return { icon: "🔍", action: "Searching for files..." };
     }
@@ -177,17 +229,22 @@ function formatToolAction(toolName: string, input: Record<string, unknown>): Too
     case "Grep": {
       const pattern = input.pattern as string | undefined;
       const path = input.path as string | undefined;
-      if (pattern && path) {
-        return { icon: "🔎", action: `Grep "${pattern}" in ${path}` };
+      if (verbosity === "high" && pattern) {
+        const pathInfo = path ? ` in ${path}` : "";
+        return { icon: "🔎", action: `Grep: "${pattern}"${pathInfo}` };
       }
       if (pattern) {
-        return { icon: "🔎", action: `Grep: ${pattern}` };
+        const shortPattern = pattern.length > 20 ? pattern.substring(0, 20) + "..." : pattern;
+        return { icon: "🔎", action: `Grep: ${shortPattern}` };
       }
       return { icon: "🔎", action: "Searching content..." };
     }
 
     case "WebSearch": {
       const query = input.query as string | undefined;
+      if (verbosity === "low") {
+        return { icon: "🌐", action: "Searching web" };
+      }
       if (query) {
         return { icon: "🌐", action: `Web search: ${query}` };
       }
@@ -196,8 +253,12 @@ function formatToolAction(toolName: string, input: Record<string, unknown>): Too
 
     case "WebFetch": {
       const url = input.url as string | undefined;
+      if (verbosity === "low") {
+        return { icon: "🌐", action: "Fetching URL" };
+      }
       if (url) {
-        return { icon: "🌐", action: `Fetching ${url}` };
+        const shortUrl = url.length > 40 ? url.substring(0, 40) + "..." : url;
+        return { icon: "🌐", action: `Fetching: ${shortUrl}` };
       }
       return { icon: "🌐", action: "Fetching URL..." };
     }
@@ -205,6 +266,9 @@ function formatToolAction(toolName: string, input: Record<string, unknown>): Too
     case "Task": {
       const desc = input.description as string | undefined;
       const subagentType = input.subagent_type as string | undefined;
+      if (verbosity === "low") {
+        return { icon: "🤖", action: "Running agent" };
+      }
       if (desc) {
         return { icon: "🤖", action: `${subagentType || "Agent"}: ${desc}` };
       }
@@ -213,14 +277,19 @@ function formatToolAction(toolName: string, input: Record<string, unknown>): Too
 
     case "TodoWrite": {
       const todos = input.todos as Array<{ content: string; status: string }> | undefined;
+      if (verbosity === "low") {
+        return { icon: "📋", action: "Updating tasks" };
+      }
       if (todos && todos.length > 0) {
         // Format todos with checkboxes
-        const taskLines = todos.slice(0, 5).map((t) => {
+        const maxTasks = verbosity === "high" ? 8 : 5;
+        const taskLines = todos.slice(0, maxTasks).map((t) => {
           const checkbox = t.status === "completed" ? "✅" : t.status === "in_progress" ? "🔄" : "⬜";
-          const content = t.content.length > 35 ? t.content.substring(0, 35) + "..." : t.content;
+          const maxLen = verbosity === "high" ? 50 : 35;
+          const content = t.content.length > maxLen ? t.content.substring(0, maxLen) + "..." : t.content;
           return `${checkbox} ${content}`;
         });
-        const more = todos.length > 5 ? `\n   +${todos.length - 5} more` : "";
+        const more = todos.length > maxTasks ? `\n   +${todos.length - maxTasks} more` : "";
         return { icon: "📋", action: `Tasks:\n   ${taskLines.join("\n   ")}${more}` };
       }
       return { icon: "📋", action: "Updating tasks..." };
@@ -597,6 +666,7 @@ export async function executeQuery(
 ): Promise<QueryResult> {
   const sessionId = session.getSessionId(chatId);
   const inPlanMode = session.isPlanMode(chatId);
+  const verbosity = session.getVerbosity(chatId);
 
   // Create abort controller for this query
   const abortController = new AbortController();
@@ -654,9 +724,11 @@ export async function executeQuery(
             const toolName = block.name;
             const toolInput = block.input as Record<string, unknown>;
 
-            // Extract detailed description based on tool type
-            const { icon, action } = formatToolAction(toolName, toolInput);
-            await ui.updateStatusMessage(bot, chatId, action, icon);
+            // Extract detailed description based on tool type and verbosity
+            const { icon, action, skip } = formatToolAction(toolName, toolInput, verbosity);
+            if (!skip) {
+              await ui.updateStatusMessage(bot, chatId, action, icon);
+            }
           }
 
           // Stream text responses - show Claude's reasoning/explanation

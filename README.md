@@ -69,9 +69,12 @@ Edit `.env` with your values:
 
 ```bash
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
-TELEGRAM_CHAT_ID=1234567890
-WORKING_DIR=/home/pi/projects  # Optional, defaults to current dir
+TELEGRAM_CHAT_IDS=1234567890              # Single user
+# TELEGRAM_CHAT_IDS=123,456,789           # Multiple users (comma-separated)
+WORKING_DIR=/home/pi/projects             # Optional, defaults to current dir
 ```
+
+**Multi-user setup:** Add multiple chat IDs separated by commas. Each user gets their own independent session. All users share the same Claude API quota.
 
 ### 6. Run
 
@@ -110,12 +113,24 @@ npm run build && npm start
 |---------|-------------|
 | `/stats` | CPU/memory with 10-min histogram |
 | `/usage` | Claude API usage & limits |
+| `/verbose` | Set output detail level (low/normal/high) |
 | `/help` | Show all commands |
 | `/restart` | Restart the bot |
 
+### Verbosity Levels
+
+Control how much detail is shown during operations:
+
+| Level | Description |
+|-------|-------------|
+| `/verbose low` | Minimal - just "Running command", skips read operations |
+| `/verbose normal` | Default - file names, brief descriptions |
+| `/verbose high` | Detailed - full commands, code diffs, paths |
+
 ## 🔒 Security
 
-- **Single-user only** - Only your `TELEGRAM_CHAT_ID` can interact
+- **Whitelist-only access** - Only chat IDs in `TELEGRAM_CHAT_IDS` can interact
+- **Multi-user support** - Add friends by adding their chat IDs (comma-separated)
 - **Tool approval** - Bash commands and file writes need explicit approval
 - **Auto-approve option** - "Allow All" to trust a tool for the session
 - **No API keys stored** - Uses Claude CLI's OAuth authentication
