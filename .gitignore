@@ -37,8 +37,8 @@ Thumbs.db
 # Claude CLI local data
 .claude/
 
-# Old monolithic file (pre-refactor)
-index.ts
+# Old monolithic file (pre-refactor, in root only)
+/index.ts
 
 # Session data (runtime)
 sessions/
