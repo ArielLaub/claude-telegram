@@ -114,7 +114,8 @@ function formatCaptainsLog(status: StatusMessage): string {
   let text = `<b>Claude</b> · ${duration}${tokenDisplay}${pauseIndicator}\n\n`;
 
   for (const entry of status.entries) {
-    text += `<blockquote>${entry.icon} <b>${escapeHtml(entry.action)}</b></blockquote>\n`;
+    const detailsText = entry.details ? ` ${escapeHtml(entry.details)}` : "";
+    text += `<blockquote>${entry.icon} <b>${escapeHtml(entry.action)}</b>${detailsText}</blockquote>\n`;
   }
 
   // Add waiting indicator if paused
@@ -179,7 +180,8 @@ export async function updateStatusMessage(
   bot: TelegramBot,
   chatId: number,
   action: string,
-  icon = "⚙️"
+  icon = "⚙️",
+  details?: string
 ): Promise<void> {
   const status = statusMessages.get(chatId);
   if (!status) return;
@@ -188,6 +190,7 @@ export async function updateStatusMessage(
   const entry: LogEntry = {
     timestamp: new Date(),
     action,
+    details,
     icon,
   };
   status.entries.push(entry);
@@ -292,7 +295,7 @@ export async function resumeStatusMessage(
 /** Get the current status (for context) */
 export function getStatusActions(chatId: number): string[] {
   const status = statusMessages.get(chatId);
-  return status?.entries.map(e => `${e.icon} ${e.action}`) || [];
+  return status?.entries.map(e => `${e.icon} ${e.action}${e.details ? ` ${e.details}` : ""}`) || [];
 }
 
 /** Finalize the log with completion status (keeps message, stops updates) */
@@ -328,7 +331,8 @@ export async function finalizeStatusMessage(
   let text = `<b>Claude</b> · ${duration}${tokenDisplay} ${statusIcon}\n\n`;
 
   for (const e of status.entries) {
-    text += `<blockquote>${e.icon} <b>${escapeHtml(e.action)}</b></blockquote>\n`;
+    const detailsText = e.details ? ` ${escapeHtml(e.details)}` : "";
+    text += `<blockquote>${e.icon} <b>${escapeHtml(e.action)}</b>${detailsText}</blockquote>\n`;
   }
 
   try {

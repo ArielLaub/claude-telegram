@@ -80,7 +80,8 @@ export interface PendingApproval {
 /** A single log entry in the Captain's Log */
 export interface LogEntry {
   timestamp: Date;
-  action: string;
+  action: string;    // Bold action name (e.g., "Editing")
+  details?: string;  // Non-bold details (e.g., "file.ts")
   icon: string;
 }
 

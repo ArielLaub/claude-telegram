@@ -121,8 +121,9 @@ function formatActionsSummary(actions: string[]): string {
 /** Tool action with icon and description separated for Captain's Log */
 interface ToolAction {
   icon: string;
-  action: string;
-  skip?: boolean;  // If true, don't show this action in the log
+  action: string;    // Bold action name
+  details?: string;  // Non-bold details
+  skip?: boolean;    // If true, don't show this action in the log
 }
 
 /** Tools that are skipped in low verbosity mode */
@@ -145,23 +146,20 @@ function formatToolAction(
       const cmd = input.command as string | undefined;
 
       if (verbosity === "low") {
-        // Minimal output
         return { icon: "🔧", action: "Running command" };
       }
       if (verbosity === "high" && cmd) {
-        // Show full command
         const truncCmd = cmd.length > 80 ? cmd.substring(0, 80) + "..." : cmd;
-        return { icon: "🔧", action: `$ ${truncCmd}` };
+        return { icon: "🔧", action: "Running", details: `$ ${truncCmd}` };
       }
-      // Normal verbosity
       if (desc) {
         return { icon: "🔧", action: desc };
       }
       if (cmd) {
-        const shortCmd = cmd.split(" ")[0]; // Just the command name
-        return { icon: "🔧", action: `Running: ${shortCmd}` };
+        const shortCmd = cmd.split(" ")[0];
+        return { icon: "🔧", action: "Running", details: shortCmd };
       }
-      return { icon: "🔧", action: "Executing command..." };
+      return { icon: "🔧", action: "Executing command" };
     }
 
     case "Read": {
@@ -169,14 +167,13 @@ function formatToolAction(
       if (verbosity === "high" && path) {
         const lines = input.limit as number | undefined;
         const lineInfo = lines ? ` (${lines} lines)` : "";
-        return { icon: "📖", action: `Reading: ${path}${lineInfo}` };
+        return { icon: "📖", action: "Reading", details: `${path}${lineInfo}` };
       }
       if (path) {
-        // Normal: just the filename
         const filename = path.split("/").pop() || path;
-        return { icon: "📖", action: `Reading ${filename}` };
+        return { icon: "📖", action: "Reading", details: filename };
       }
-      return { icon: "📖", action: "Reading file..." };
+      return { icon: "📖", action: "Reading file" };
     }
 
     case "Write": {
@@ -186,9 +183,9 @@ function formatToolAction(
       }
       if (path) {
         const filename = path.split("/").pop() || path;
-        return { icon: "✏️", action: `Writing ${filename}` };
+        return { icon: "✏️", action: "Writing", details: filename };
       }
-      return { icon: "✏️", action: "Writing file..." };
+      return { icon: "✏️", action: "Writing file" };
     }
 
     case "Edit": {
@@ -203,27 +200,27 @@ function formatToolAction(
         if (oldStr && newStr) {
           const oldPreview = oldStr.length > 30 ? oldStr.substring(0, 30) + "..." : oldStr;
           const newPreview = newStr.length > 30 ? newStr.substring(0, 30) + "..." : newStr;
-          return { icon: "✏️", action: `Edit ${filename}:\n"${oldPreview}"\n→ "${newPreview}"` };
+          return { icon: "✏️", action: "Editing", details: `${filename}\n"${oldPreview}"\n→ "${newPreview}"` };
         }
-        return { icon: "✏️", action: `Editing ${filename}` };
+        return { icon: "✏️", action: "Editing", details: filename };
       }
       if (path) {
         const filename = path.split("/").pop() || path;
-        return { icon: "✏️", action: `Editing ${filename}` };
+        return { icon: "✏️", action: "Editing", details: filename };
       }
-      return { icon: "✏️", action: "Editing file..." };
+      return { icon: "✏️", action: "Editing file" };
     }
 
     case "Glob": {
       const pattern = input.pattern as string | undefined;
       const path = input.path as string | undefined;
       if (verbosity === "high" && pattern && path) {
-        return { icon: "🔍", action: `Glob: ${pattern} in ${path}` };
+        return { icon: "🔍", action: "Glob", details: `${pattern} in ${path}` };
       }
       if (pattern) {
-        return { icon: "🔍", action: `Finding: ${pattern}` };
+        return { icon: "🔍", action: "Finding", details: pattern };
       }
-      return { icon: "🔍", action: "Searching for files..." };
+      return { icon: "🔍", action: "Searching files" };
     }
 
     case "Grep": {
@@ -231,13 +228,13 @@ function formatToolAction(
       const path = input.path as string | undefined;
       if (verbosity === "high" && pattern) {
         const pathInfo = path ? ` in ${path}` : "";
-        return { icon: "🔎", action: `Grep: "${pattern}"${pathInfo}` };
+        return { icon: "🔎", action: "Grep", details: `"${pattern}"${pathInfo}` };
       }
       if (pattern) {
         const shortPattern = pattern.length > 20 ? pattern.substring(0, 20) + "..." : pattern;
-        return { icon: "🔎", action: `Grep: ${shortPattern}` };
+        return { icon: "🔎", action: "Grep", details: shortPattern };
       }
-      return { icon: "🔎", action: "Searching content..." };
+      return { icon: "🔎", action: "Searching content" };
     }
 
     case "WebSearch": {
@@ -246,9 +243,9 @@ function formatToolAction(
         return { icon: "🌐", action: "Searching web" };
       }
       if (query) {
-        return { icon: "🌐", action: `Web search: ${query}` };
+        return { icon: "🌐", action: "Web search", details: query };
       }
-      return { icon: "🌐", action: "Searching the web..." };
+      return { icon: "🌐", action: "Searching the web" };
     }
 
     case "WebFetch": {
@@ -258,9 +255,9 @@ function formatToolAction(
       }
       if (url) {
         const shortUrl = url.length > 40 ? url.substring(0, 40) + "..." : url;
-        return { icon: "🌐", action: `Fetching: ${shortUrl}` };
+        return { icon: "🌐", action: "Fetching", details: shortUrl };
       }
-      return { icon: "🌐", action: "Fetching URL..." };
+      return { icon: "🌐", action: "Fetching URL" };
     }
 
     case "Task": {
@@ -270,9 +267,9 @@ function formatToolAction(
         return { icon: "🤖", action: "Running agent" };
       }
       if (desc) {
-        return { icon: "🤖", action: `${subagentType || "Agent"}: ${desc}` };
+        return { icon: "🤖", action: subagentType || "Agent", details: desc };
       }
-      return { icon: "🤖", action: "Running sub-agent..." };
+      return { icon: "🤖", action: "Running sub-agent" };
     }
 
     case "TodoWrite": {
@@ -281,25 +278,23 @@ function formatToolAction(
         return { icon: "📋", action: "Updating tasks" };
       }
       if (todos && todos.length > 0) {
-        // Format todos with checkboxes
-        const maxTasks = verbosity === "high" ? 8 : 5;
-        const taskLines = todos.slice(0, maxTasks).map((t) => {
+        // Show all tasks (no limit)
+        const taskLines = todos.map((t) => {
           const checkbox = t.status === "completed" ? "✅" : t.status === "in_progress" ? "🔄" : "⬜";
-          const maxLen = verbosity === "high" ? 50 : 35;
+          const maxLen = verbosity === "high" ? 50 : 40;
           const content = t.content.length > maxLen ? t.content.substring(0, maxLen) + "..." : t.content;
           return `${checkbox} ${content}`;
         });
-        const more = todos.length > maxTasks ? `\n   +${todos.length - maxTasks} more` : "";
-        return { icon: "📋", action: `Tasks:\n   ${taskLines.join("\n   ")}${more}` };
+        return { icon: "📋", action: "Tasks", details: taskLines.join("\n") };
       }
-      return { icon: "📋", action: "Updating tasks..." };
+      return { icon: "📋", action: "Updating tasks" };
     }
 
     case "AskUserQuestion":
-      return { icon: "❓", action: "Asking question..." };
+      return { icon: "❓", action: "Asking question" };
 
     default:
-      return { icon: "⚙️", action: `Using ${toolName}...` };
+      return { icon: "⚙️", action: `Using ${toolName}` };
   }
 }
 
@@ -725,9 +720,9 @@ export async function executeQuery(
             const toolInput = block.input as Record<string, unknown>;
 
             // Extract detailed description based on tool type and verbosity
-            const { icon, action, skip } = formatToolAction(toolName, toolInput, verbosity);
+            const { icon, action, details, skip } = formatToolAction(toolName, toolInput, verbosity);
             if (!skip) {
-              await ui.updateStatusMessage(bot, chatId, action, icon);
+              await ui.updateStatusMessage(bot, chatId, action, icon, details);
             }
           }
 
