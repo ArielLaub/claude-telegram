@@ -92,6 +92,8 @@ export interface StatusMessage {
   entries: LogEntry[];
   isPaused: boolean;  // True when waiting for user input
   typingInterval?: NodeJS.Timeout;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 /** Command definition for /help */

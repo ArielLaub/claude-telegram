@@ -95,20 +95,31 @@ function formatDuration(startTime: Date): string {
   }
 }
 
+/** Format token count (e.g., 1234 -> "1.2k") */
+function formatTokens(tokens: number): string {
+  if (tokens < 1000) return `${tokens}`;
+  if (tokens < 10000) return `${(tokens / 1000).toFixed(1)}k`;
+  return `${Math.round(tokens / 1000)}k`;
+}
+
 /** Format the Captain's Log message with blockquote actions */
 function formatCaptainsLog(status: StatusMessage): string {
   const duration = formatDuration(status.startTime);
   const pauseIndicator = status.isPaused ? " ⏸️" : "";
 
-  let text = `<b>Claude</b> · ${duration}${pauseIndicator}\n\n`;
+  // Token display
+  const totalTokens = status.inputTokens + status.outputTokens;
+  const tokenDisplay = totalTokens > 0 ? ` · ${formatTokens(totalTokens)} tokens` : "";
+
+  let text = `<b>Claude</b> · ${duration}${tokenDisplay}${pauseIndicator}\n\n`;
 
   for (const entry of status.entries) {
-    text += `<blockquote>${entry.icon} ${escapeHtml(entry.action)}</blockquote>`;
+    text += `<blockquote>${entry.icon} <b>${escapeHtml(entry.action)}</b></blockquote>\n`;
   }
 
   // Add waiting indicator if paused
   if (status.isPaused) {
-    text += `<blockquote>⏸️ <i>Awaiting input...</i></blockquote>`;
+    text += `\n<blockquote>⏸️ <i>Awaiting input...</i></blockquote>`;
   }
 
   return text;
@@ -136,6 +147,8 @@ export async function createStatusMessage(
     startTime: now,
     entries: [initialEntry],
     isPaused: false,
+    inputTokens: 0,
+    outputTokens: 0,
   };
 
   const text = formatCaptainsLog(status);
@@ -199,6 +212,15 @@ export async function updateStatusMessage(
   } catch {
     // Ignore edit errors (message unchanged or rate limited)
   }
+}
+
+/** Update token counts for the status message */
+export function updateTokens(chatId: number, inputTokens: number, outputTokens: number): void {
+  const status = statusMessages.get(chatId);
+  if (!status) return;
+
+  status.inputTokens = inputTokens;
+  status.outputTokens = outputTokens;
 }
 
 /** Mark the log as paused (waiting for user input) */
@@ -301,10 +323,12 @@ export async function finalizeStatusMessage(
   // Format final message (without stop button)
   const duration = formatDuration(status.startTime);
   const statusIcon = success ? "✅" : "❌";
-  let text = `<b>Claude</b> · ${duration} ${statusIcon}\n\n`;
+  const totalTokens = status.inputTokens + status.outputTokens;
+  const tokenDisplay = totalTokens > 0 ? ` · ${formatTokens(totalTokens)} tokens` : "";
+  let text = `<b>Claude</b> · ${duration}${tokenDisplay} ${statusIcon}\n\n`;
 
   for (const e of status.entries) {
-    text += `<blockquote>${e.icon} ${escapeHtml(e.action)}</blockquote>`;
+    text += `<blockquote>${e.icon} <b>${escapeHtml(e.action)}</b></blockquote>\n`;
   }
 
   try {
@@ -465,10 +489,6 @@ export async function sendCompletionMessage(
 
   // Send the actual response as a new message
   const responseMsg = await sendMessage(bot, chatId, text, options);
-
-  // Send a brief notification ping to ensure user gets alerted
-  // This helps when Telegram groups/silences rapid messages
-  await bot.sendMessage(chatId, "✅ <b>Done</b>", { parse_mode: "HTML" });
 
   return responseMsg;
 }

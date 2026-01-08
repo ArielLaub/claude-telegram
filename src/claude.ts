@@ -211,8 +211,20 @@ function formatToolAction(toolName: string, input: Record<string, unknown>): Too
       return { icon: "🤖", action: "Running sub-agent..." };
     }
 
-    case "TodoWrite":
-      return { icon: "📝", action: "Updating task list..." };
+    case "TodoWrite": {
+      const todos = input.todos as Array<{ content: string; status: string }> | undefined;
+      if (todos && todos.length > 0) {
+        // Format todos with checkboxes
+        const taskLines = todos.slice(0, 5).map((t) => {
+          const checkbox = t.status === "completed" ? "✅" : t.status === "in_progress" ? "🔄" : "⬜";
+          const content = t.content.length > 35 ? t.content.substring(0, 35) + "..." : t.content;
+          return `${checkbox} ${content}`;
+        });
+        const more = todos.length > 5 ? `\n   +${todos.length - 5} more` : "";
+        return { icon: "📋", action: `Tasks:\n   ${taskLines.join("\n   ")}${more}` };
+      }
+      return { icon: "📋", action: "Updating tasks..." };
+    }
 
     case "AskUserQuestion":
       return { icon: "❓", action: "Asking question..." };
@@ -668,6 +680,12 @@ export async function executeQuery(
 
       // Handle result
       if (message.type === "result") {
+        // Update token counts from result
+        const usage = (message as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+        if (usage) {
+          ui.updateTokens(chatId, usage.input_tokens || 0, usage.output_tokens || 0);
+        }
+
         if (message.subtype === "success") {
           // Send the final response
           await ui.sendCompletionMessage(bot, chatId, responseText || "Done.");
