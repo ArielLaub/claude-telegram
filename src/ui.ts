@@ -481,6 +481,37 @@ export async function sendMessage(
   }
 }
 
+/** Convert Claude's markdown response to Telegram HTML */
+function formatClaudeResponse(text: string): string {
+  if (!text.trim()) return "";
+
+  let html = text;
+
+  // Escape HTML first (but preserve markdown)
+  html = html
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // Convert markdown code blocks to HTML
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) => {
+    return `<pre>${code.trim()}</pre>`;
+  });
+
+  // Convert inline code
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  // Convert bold (**text** or __text__)
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  html = html.replace(/__([^_]+)__/g, "<b>$1</b>");
+
+  // Convert italic (*text* or _text_) - careful not to match inside words
+  html = html.replace(/(?<![*\w])\*([^*]+)\*(?![*\w])/g, "<i>$1</i>");
+  html = html.replace(/(?<![_\w])_([^_]+)_(?![_\w])/g, "<i>$1</i>");
+
+  return html;
+}
+
 /** Send completion message - finalizes log, sends response */
 export async function sendCompletionMessage(
   bot: TelegramBot,
@@ -491,8 +522,14 @@ export async function sendCompletionMessage(
   // Finalize the Captain's Log (keeps it visible with completion status)
   await finalizeStatusMessage(bot, chatId, true);
 
+  // Format response with nice styling (markdown -> HTML)
+  const formattedText = formatClaudeResponse(text);
+
   // Send the actual response as a new message
-  const responseMsg = await sendMessage(bot, chatId, text, options);
+  const responseMsg = await sendMessage(bot, chatId, formattedText, {
+    ...options,
+    parse_mode: "HTML",
+  });
 
   return responseMsg;
 }
