@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+*.tgz
+
+# Environment (contains secrets!)
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Code coverage
+coverage/
+*.lcov
+
+# Caches
+.eslintcache
+.cache/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude CLI local data
+.claude/
+
+# Old monolithic file (pre-refactor)
+index.ts
+
+# Session data (runtime)
+sessions/
