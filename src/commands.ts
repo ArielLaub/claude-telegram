@@ -1,15 +1,16 @@
 /**
- * Claudine Telegram Bot - Command Handlers
+ * Claudine Bot - Command Handlers
  *
- * Handles all slash commands (/help, /new, /stop, etc.)
+ * Platform-agnostic slash command handlers.
  */
 
-import TelegramBot from "node-telegram-bot-api";
 import { exec } from "child_process";
 import { promisify } from "util";
 import * as os from "os";
 import * as fs from "fs";
 import * as https from "https";
+import type { PlatformAdapter } from "./adapters/types.js";
+import { TelegramAdapter } from "./adapters/telegram/index.js";
 import { COMMANDS, Command, VerbosityLevel } from "./types.js";
 import * as session from "./session.js";
 import * as queue from "./queue.js";
@@ -23,8 +24,8 @@ const execAsync = promisify(exec);
 // ============================================================================
 
 export type CommandHandler = (
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   args?: string
 ) => Promise<boolean>; // Returns true if handled
 
@@ -32,7 +33,7 @@ export type CommandHandler = (
 // Help Command
 // ============================================================================
 
-export async function handleHelp(bot: TelegramBot, chatId: number): Promise<boolean> {
+export async function handleHelp(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
   const sessionCmds = COMMANDS.filter((c) => c.category === "session");
   const modeCmds = COMMANDS.filter((c) => c.category === "mode");
   const systemCmds = COMMANDS.filter((c) => c.category === "system");
@@ -47,7 +48,7 @@ export async function handleHelp(bot: TelegramBot, chatId: number): Promise<bool
     `<b>System Commands</b>\n${formatGroup(systemCmds)}\n\n` +
     `<i>Send any message to chat with Claude.</i>`;
 
-  await ui.sendMessage(bot, chatId, message, { parse_mode: "HTML" });
+  await ui.sendMessage(adapter, chatId, message);
   return true;
 }
 
@@ -55,26 +56,26 @@ export async function handleHelp(bot: TelegramBot, chatId: number): Promise<bool
 // Session Commands
 // ============================================================================
 
-export async function handleNew(bot: TelegramBot, chatId: number): Promise<boolean> {
-  session.resetChatState(chatId);
-  queue.clearQueue(chatId);
-  await ui.sendMessage(bot, chatId, "Started new conversation.");
+export async function handleNew(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  session.resetChatState(Number(chatId));
+  queue.clearQueue(Number(chatId));
+  await ui.sendMessage(adapter, chatId, "Started new conversation.");
   return true;
 }
 
 export async function handleSessions(
-  bot: TelegramBot,
-  chatId: number
+  adapter: PlatformAdapter,
+  chatId: string
 ): Promise<{ handled: boolean; selectedSessionId?: string | null }> {
   const history = session.getSessionHistory();
 
   if (history.length === 0) {
-    await ui.sendMessage(bot, chatId, "No recent sessions found.");
+    await ui.sendMessage(adapter, chatId, "No recent sessions found.");
     return { handled: true, selectedSessionId: null };
   }
 
   const selectionId = `${chatId}_${Date.now()}`;
-  const keyboard = ui.buildSessionKeyboard(selectionId, history);
+  const keyboard = ui.buildSessionKeyboard(adapter, selectionId, history);
 
   let message = "<b>Recent Sessions:</b>\n\n";
   history.slice(0, 5).forEach((sess, idx) => {
@@ -87,50 +88,47 @@ export async function handleSessions(
     message += `<b>${idx + 1}.</b> ${timeStr}\n   ${nameDisplay}\n\n`;
   });
 
-  await bot.sendMessage(chatId, message, {
-    parse_mode: "HTML",
-    reply_markup: keyboard,
-  });
+  await adapter.send(chatId, message, { rawKeyboard: keyboard });
 
   // Return info for callback handling - actual selection handled by callback
   return { handled: true, selectedSessionId: undefined };
 }
 
-export async function handleResume(bot: TelegramBot, chatId: number): Promise<boolean> {
+export async function handleResume(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
   const history = session.getSessionHistory();
 
   if (history.length === 0) {
-    await ui.sendMessage(bot, chatId, "No recent sessions to resume. Use /new to start fresh.");
+    await ui.sendMessage(adapter, chatId, "No recent sessions to resume. Use /new to start fresh.");
     return true;
   }
 
   const mostRecent = history[0];
-  session.setSessionId(chatId, mostRecent.sessionId);
+  session.setSessionId(Number(chatId), mostRecent.sessionId);
 
   const date = new Date(mostRecent.timestamp).toLocaleString();
   await ui.sendMessage(
-    bot,
+    adapter,
     chatId,
-    `Resumed session from ${date}\n<i>${ui.escapeHtml(mostRecent.preview)}</i>`,
-    { parse_mode: "HTML" }
+    `Resumed session from ${date}\n<i>${ui.escapeHtml(mostRecent.preview)}</i>`
   );
   return true;
 }
 
-export async function handleClear(bot: TelegramBot, chatId: number): Promise<boolean> {
-  session.resetChatState(chatId);
+export async function handleClear(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  session.resetChatState(Number(chatId));
   session.clearSessionHistory();
-  queue.clearQueue(chatId);
-  await ui.sendMessage(bot, chatId, "Session history cleared. Starting fresh.");
+  queue.clearQueue(Number(chatId));
+  await ui.sendMessage(adapter, chatId, "Session history cleared. Starting fresh.");
   return true;
 }
 
-export async function handleStatus(bot: TelegramBot, chatId: number): Promise<boolean> {
-  const sessionId = session.getSessionId(chatId);
-  const autoTools = session.getAutoApprovedTools(chatId);
-  const inPlanMode = session.isPlanMode(chatId);
-  const queueLength = queue.getQueueLength(chatId);
-  const isProc = queue.isProcessing(chatId);
+export async function handleStatus(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  const numericChatId = Number(chatId);
+  const sessionId = session.getSessionId(numericChatId);
+  const autoTools = session.getAutoApprovedTools(numericChatId);
+  const inPlanMode = session.isPlanMode(numericChatId);
+  const queueLength = queue.getQueueLength(numericChatId);
+  const isProc = queue.isProcessing(numericChatId);
 
   // Get session name if available
   let sessionDisplay = "none";
@@ -151,20 +149,20 @@ export async function handleStatus(bot: TelegramBot, chatId: number): Promise<bo
     `Queued messages: ${queueLength}\n` +
     `Auto-approved tools: ${autoTools.length > 0 ? autoTools.join(", ") : "none"}`;
 
-  await ui.sendMessage(bot, chatId, message, { parse_mode: "HTML" });
+  await ui.sendMessage(adapter, chatId, message);
   return true;
 }
 
 export async function handleName(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   name?: string
 ): Promise<boolean> {
-  const sessionId = session.getSessionId(chatId);
+  const sessionId = session.getSessionId(Number(chatId));
 
   if (!sessionId) {
     await ui.sendMessage(
-      bot,
+      adapter,
       chatId,
       "No active session. Start a conversation first, then use /name to name it."
     );
@@ -176,17 +174,15 @@ export async function handleName(
     const sess = session.getSessionById(sessionId);
     if (sess?.name) {
       await ui.sendMessage(
-        bot,
+        adapter,
         chatId,
-        `Current session name: <b>${ui.escapeHtml(sess.name)}</b>\n\nUse <code>/name &lt;new name&gt;</code> to change it.`,
-        { parse_mode: "HTML" }
+        `Current session name: <b>${ui.escapeHtml(sess.name)}</b>\n\nUse <code>/name &lt;new name&gt;</code> to change it.`
       );
     } else {
       await ui.sendMessage(
-        bot,
+        adapter,
         chatId,
-        "This session has no name.\n\nUse <code>/name &lt;name&gt;</code> to set one.",
-        { parse_mode: "HTML" }
+        "This session has no name.\n\nUse <code>/name &lt;name&gt;</code> to set one."
       );
     }
     return true;
@@ -197,13 +193,12 @@ export async function handleName(
 
   if (success) {
     await ui.sendMessage(
-      bot,
+      adapter,
       chatId,
-      `✅ Session named: <b>${ui.escapeHtml(name.trim())}</b>`,
-      { parse_mode: "HTML" }
+      `✅ Session named: <b>${ui.escapeHtml(name.trim())}</b>`
     );
   } else {
-    await ui.sendMessage(bot, chatId, "Failed to set session name.");
+    await ui.sendMessage(adapter, chatId, "Failed to set session name.");
   }
 
   return true;
@@ -213,49 +208,49 @@ export async function handleName(
 // Mode Commands
 // ============================================================================
 
-export async function handlePlan(bot: TelegramBot, chatId: number): Promise<boolean> {
-  session.setPlanMode(chatId, true);
+export async function handlePlan(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  session.setPlanMode(Number(chatId), true);
   await ui.sendMessage(
-    bot,
+    adapter,
     chatId,
     "<b>Plan Mode Enabled</b>\n\n" +
       "Claude will now explore and create a plan without making changes.\n" +
       "Use /approve to execute the plan\n" +
-      "Use /cancel to exit plan mode",
-    { parse_mode: "HTML" }
+      "Use /cancel to exit plan mode"
   );
   return true;
 }
 
-export async function handleApprove(bot: TelegramBot, chatId: number): Promise<boolean> {
-  if (!session.isPlanMode(chatId)) {
-    await ui.sendMessage(bot, chatId, "Not in plan mode. Use /plan first.");
+export async function handleApprove(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  const numericChatId = Number(chatId);
+  if (!session.isPlanMode(numericChatId)) {
+    await ui.sendMessage(adapter, chatId, "Not in plan mode. Use /plan first.");
     return true;
   }
-  session.setPlanMode(chatId, false);
-  await ui.sendMessage(bot, chatId, "<b>Plan Approved</b>\nSend your next message to execute.", {
-    parse_mode: "HTML",
-  });
+  session.setPlanMode(numericChatId, false);
+  await ui.sendMessage(adapter, chatId, "<b>Plan Approved</b>\nSend your next message to execute.");
   return true;
 }
 
-export async function handleCancel(bot: TelegramBot, chatId: number): Promise<boolean> {
-  if (!session.isPlanMode(chatId)) {
-    await ui.sendMessage(bot, chatId, "Not in plan mode.");
+export async function handleCancel(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  const numericChatId = Number(chatId);
+  if (!session.isPlanMode(numericChatId)) {
+    await ui.sendMessage(adapter, chatId, "Not in plan mode.");
     return true;
   }
-  session.setPlanMode(chatId, false);
-  await ui.sendMessage(bot, chatId, "<b>Plan Mode Cancelled</b>", { parse_mode: "HTML" });
+  session.setPlanMode(numericChatId, false);
+  await ui.sendMessage(adapter, chatId, "<b>Plan Mode Cancelled</b>");
   return true;
 }
 
-export async function handleStop(bot: TelegramBot, chatId: number): Promise<boolean> {
-  const wasAborted = queue.abortCurrentOperation(chatId);
-  const clearedCount = queue.clearQueue(chatId);
-  queue.setProcessing(chatId, false);
+export async function handleStop(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  const numericChatId = Number(chatId);
+  const wasAborted = queue.abortCurrentOperation(numericChatId);
+  const clearedCount = queue.clearQueue(numericChatId);
+  queue.setProcessing(numericChatId, false);
 
   // Clear any status message
-  await ui.clearStatusMessage(bot, chatId);
+  await ui.clearStatusMessage(adapter, chatId);
 
   let message = "<b>Stopped</b>";
   if (wasAborted) {
@@ -268,7 +263,7 @@ export async function handleStop(bot: TelegramBot, chatId: number): Promise<bool
     message += "\nNothing was running.";
   }
 
-  await ui.sendMessage(bot, chatId, message, { parse_mode: "HTML" });
+  await ui.sendMessage(adapter, chatId, message);
   return true;
 }
 
@@ -276,7 +271,7 @@ export async function handleStop(bot: TelegramBot, chatId: number): Promise<bool
 // System Commands
 // ============================================================================
 
-export async function handleStats(bot: TelegramBot, chatId: number): Promise<boolean> {
+export async function handleStats(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
   try {
     // Get CPU usage
     const cpus = os.cpus();
@@ -336,15 +331,15 @@ export async function handleStats(bot: TelegramBot, chatId: number): Promise<boo
       `Temperature: ${temp}\n` +
       `Bot Uptime: ${uptimeStr}`;
 
-    await ui.sendMessage(bot, chatId, statsMsg, { parse_mode: "HTML" });
+    await ui.sendMessage(adapter, chatId, statsMsg);
   } catch (error) {
-    await ui.sendMessage(bot, chatId, `Error getting stats: ${error}`);
+    await ui.sendMessage(adapter, chatId, `Error getting stats: ${error}`);
   }
   return true;
 }
 
-export async function handleRestart(bot: TelegramBot, chatId: number): Promise<boolean> {
-  await ui.sendMessage(bot, chatId, "Claudine is restarting...");
+export async function handleRestart(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  await ui.sendMessage(adapter, chatId, "Claudine is restarting...");
   // Give time for message to send
   setTimeout(() => {
     process.exit(0); // systemd will restart us
@@ -461,9 +456,9 @@ function createProgressBar(percent: number, width = 10): string {
   return filledChar.repeat(filled) + "⬜".repeat(empty);
 }
 
-export async function handleUsage(bot: TelegramBot, chatId: number): Promise<boolean> {
+export async function handleUsage(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
   try {
-    await ui.sendMessage(bot, chatId, "Fetching usage data...");
+    await ui.sendMessage(adapter, chatId, "Fetching usage data...");
 
     const usage = await fetchAnthropicUsage();
 
@@ -499,35 +494,32 @@ export async function handleUsage(bot: TelegramBot, chatId: number): Promise<boo
       message += `Resets in: ${reset}\n`;
     }
 
-    await ui.sendMessage(bot, chatId, message, { parse_mode: "HTML" });
+    await ui.sendMessage(adapter, chatId, message);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    await ui.sendMessage(bot, chatId, `<b>Error fetching usage:</b> ${ui.escapeHtml(errMsg)}`, {
-      parse_mode: "HTML",
-    });
+    await ui.sendMessage(adapter, chatId, `<b>Error fetching usage:</b> ${ui.escapeHtml(errMsg)}`);
   }
   return true;
 }
 
-export async function handleStart(bot: TelegramBot, chatId: number): Promise<boolean> {
+export async function handleStart(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
   // Same as help but with welcome message
   await ui.sendMessage(
-    bot,
+    adapter,
     chatId,
     "<b>Welcome to Claudine!</b>\n\n" +
       "I'm a Claude-powered assistant running on Telegram.\n\n" +
-      "Use /help to see all commands, or just send a message to start chatting.",
-    { parse_mode: "HTML" }
+      "Use /help to see all commands, or just send a message to start chatting."
   );
   return true;
 }
 
 export async function handleVerbose(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   level?: string
 ): Promise<boolean> {
-  const currentLevel = session.getVerbosity(chatId);
+  const currentLevel = session.getVerbosity(Number(chatId));
 
   // Show current level if no argument
   if (!level || level.trim() === "") {
@@ -538,15 +530,14 @@ export async function handleVerbose(
     };
 
     await ui.sendMessage(
-      bot,
+      adapter,
       chatId,
       `<b>Verbosity Level:</b> ${currentLevel}\n` +
         `<i>${descriptions[currentLevel]}</i>\n\n` +
         `Usage:\n` +
         `<code>/verbose low</code> - minimal output\n` +
         `<code>/verbose normal</code> - default\n` +
-        `<code>/verbose high</code> - show details`,
-      { parse_mode: "HTML" }
+        `<code>/verbose high</code> - show details`
     );
     return true;
   }
@@ -555,16 +546,15 @@ export async function handleVerbose(
   const newLevel = level.trim().toLowerCase();
   if (newLevel !== "low" && newLevel !== "normal" && newLevel !== "high") {
     await ui.sendMessage(
-      bot,
+      adapter,
       chatId,
       `Invalid verbosity level: <code>${ui.escapeHtml(level)}</code>\n` +
-        `Valid options: <code>low</code>, <code>normal</code>, <code>high</code>`,
-      { parse_mode: "HTML" }
+        `Valid options: <code>low</code>, <code>normal</code>, <code>high</code>`
     );
     return true;
   }
 
-  session.setVerbosity(chatId, newLevel as VerbosityLevel);
+  session.setVerbosity(Number(chatId), newLevel as VerbosityLevel);
 
   const icons: Record<VerbosityLevel, string> = {
     low: "🔕",
@@ -573,37 +563,29 @@ export async function handleVerbose(
   };
 
   await ui.sendMessage(
-    bot,
+    adapter,
     chatId,
-    `${icons[newLevel as VerbosityLevel]} Verbosity set to <b>${newLevel}</b>`,
-    { parse_mode: "HTML" }
+    `${icons[newLevel as VerbosityLevel]} Verbosity set to <b>${newLevel}</b>`
   );
   return true;
 }
 
 // ============================================================================
-// Telegram Menu Registration
+// Platform Command Registration
 // ============================================================================
 
-/** Register bot commands with Telegram for the menu button */
-export async function registerBotCommands(bot: TelegramBot): Promise<void> {
-  try {
+/** Register bot commands with the platform (Telegram menu, etc.) */
+export async function registerBotCommands(adapter: PlatformAdapter): Promise<void> {
+  // Telegram-specific command registration
+  if (adapter instanceof TelegramAdapter) {
     const commandList = COMMANDS.map((cmd) => ({
       command: cmd.command.replace("/", ""), // Remove leading slash
       description: cmd.description,
     }));
 
-    console.log("Registering commands:", commandList.map(c => c.command).join(", "));
-
-    // Use the request method directly for better reliability
-    const result = await (bot as any).request("setMyCommands", {
-      commands: commandList,
-    });
-
-    console.log("Bot commands registered with Telegram menu, result:", result);
-  } catch (error) {
-    console.error("Failed to register bot commands:", error);
+    await adapter.registerCommands(commandList);
   }
+  // Other platforms can add their registration logic here
 }
 
 // ============================================================================
@@ -612,8 +594,8 @@ export async function registerBotCommands(bot: TelegramBot): Promise<void> {
 
 /** Route a command to its handler. Returns true if command was handled. */
 export async function routeCommand(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   text: string
 ): Promise<boolean> {
   const [command, ...argParts] = text.split(" ");
@@ -621,38 +603,38 @@ export async function routeCommand(
 
   switch (command.toLowerCase()) {
     case "/start":
-      return handleStart(bot, chatId);
+      return handleStart(adapter, chatId);
     case "/help":
-      return handleHelp(bot, chatId);
+      return handleHelp(adapter, chatId);
     case "/new":
-      return handleNew(bot, chatId);
+      return handleNew(adapter, chatId);
     case "/sessions":
-      const result = await handleSessions(bot, chatId);
+      const result = await handleSessions(adapter, chatId);
       return result.handled;
     case "/resume":
-      return handleResume(bot, chatId);
+      return handleResume(adapter, chatId);
     case "/name":
-      return handleName(bot, chatId, args);
+      return handleName(adapter, chatId, args);
     case "/clear":
-      return handleClear(bot, chatId);
+      return handleClear(adapter, chatId);
     case "/status":
-      return handleStatus(bot, chatId);
+      return handleStatus(adapter, chatId);
     case "/plan":
-      return handlePlan(bot, chatId);
+      return handlePlan(adapter, chatId);
     case "/approve":
-      return handleApprove(bot, chatId);
+      return handleApprove(adapter, chatId);
     case "/cancel":
-      return handleCancel(bot, chatId);
+      return handleCancel(adapter, chatId);
     case "/stop":
-      return handleStop(bot, chatId);
+      return handleStop(adapter, chatId);
     case "/stats":
-      return handleStats(bot, chatId);
+      return handleStats(adapter, chatId);
     case "/usage":
-      return handleUsage(bot, chatId);
+      return handleUsage(adapter, chatId);
     case "/verbose":
-      return handleVerbose(bot, chatId, args);
+      return handleVerbose(adapter, chatId, args);
     case "/restart":
-      return handleRestart(bot, chatId);
+      return handleRestart(adapter, chatId);
     default:
       return false; // Not a recognized command
   }

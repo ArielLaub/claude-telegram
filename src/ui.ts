@@ -1,109 +1,26 @@
 /**
- * Claudine Telegram Bot - UI Helpers
+ * Claudine Bot - UI Helpers
  *
- * Telegram-specific UI utilities: formatting, keyboards, status messages.
+ * Platform-agnostic UI utilities. Uses adapter for platform-specific operations.
  */
 
-import TelegramBot from "node-telegram-bot-api";
-import { StatusMessage, LogEntry, TELEGRAM_MESSAGE_LIMIT, TYPING_INTERVAL_MS } from "./types.js";
+import type { PlatformAdapter } from "./adapters/types.js";
+import { StatusMessage, LogEntry, TYPING_INTERVAL_MS } from "./types.js";
 
-// ============================================================================
-// Text Formatting
-// ============================================================================
-
-/** Escape special characters for Telegram Markdown (legacy) */
-export function escapeMarkdown(text: string): string {
-  return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
-}
-
-/** Escape special characters for Telegram HTML */
-export function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-/** Truncate text to fit Telegram's message limit */
-export function truncateText(text: string, maxLength = TELEGRAM_MESSAGE_LIMIT): string {
-  if (text.length <= maxLength) {
-    return text;
-  }
-  return text.substring(0, maxLength - 20) + "\n\n... (truncated)";
-}
-
-/** Split long text into chunks for multiple messages */
-export function splitText(text: string, maxLength = 4000): string[] {
-  if (text.length <= maxLength) {
-    return [text];
-  }
-
-  const chunks: string[] = [];
-  let remaining = text;
-
-  while (remaining.length > 0) {
-    if (remaining.length <= maxLength) {
-      chunks.push(remaining);
-      break;
-    }
-
-    // Try to split at a newline
-    let splitIndex = remaining.lastIndexOf("\n", maxLength);
-    if (splitIndex === -1 || splitIndex < maxLength / 2) {
-      // No good newline, split at space
-      splitIndex = remaining.lastIndexOf(" ", maxLength);
-    }
-    if (splitIndex === -1 || splitIndex < maxLength / 2) {
-      // No good space either, hard split
-      splitIndex = maxLength;
-    }
-
-    chunks.push(remaining.substring(0, splitIndex));
-    remaining = remaining.substring(splitIndex).trimStart();
-  }
-
-  return chunks;
-}
+// Re-export commonly used formatter functions from adapter
+// (These will be available once an adapter is set)
+export { escapeHtml, truncateText, splitText, formatDuration, formatTokens } from "./adapters/telegram/formatter.js";
+import { escapeHtml, TELEGRAM_MESSAGE_LIMIT, formatDuration, formatTokens } from "./adapters/telegram/formatter.js";
 
 // ============================================================================
 // Captain's Log - Status Messages
 // ============================================================================
 
 /** Active status messages per chat */
-const statusMessages = new Map<number, StatusMessage>();
-
-/** Build stop button keyboard */
-function buildStopKeyboard(chatId: number): TelegramBot.InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [[{ text: "🛑 Stop", callback_data: `stop_${chatId}` }]],
-  };
-}
-
-/** Format elapsed duration */
-function formatDuration(startTime: Date): string {
-  const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
-  if (elapsed < 60) {
-    return `${elapsed}s`;
-  } else if (elapsed < 3600) {
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
-    return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
-  } else {
-    const hours = Math.floor(elapsed / 3600);
-    const mins = Math.floor((elapsed % 3600) / 60);
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-  }
-}
-
-/** Format token count (e.g., 1234 -> "1.2k") */
-function formatTokens(tokens: number): string {
-  if (tokens < 1000) return `${tokens}`;
-  if (tokens < 10000) return `${(tokens / 1000).toFixed(1)}k`;
-  return `${Math.round(tokens / 1000)}k`;
-}
+const statusMessages = new Map<string, StatusMessage>();
 
 /** Format the Captain's Log message with blockquote actions */
-function formatCaptainsLog(status: StatusMessage): string {
+function formatCaptainsLog(status: StatusMessage, formatter: PlatformAdapter["formatter"]): string {
   const duration = formatDuration(status.startTime);
   const pauseIndicator = status.isPaused ? " ⏸️" : "";
 
@@ -114,8 +31,8 @@ function formatCaptainsLog(status: StatusMessage): string {
   let text = `<b>Claude</b> · ${duration}${tokenDisplay}${pauseIndicator}\n\n`;
 
   for (const entry of status.entries) {
-    const detailsText = entry.details ? ` ${escapeHtml(entry.details)}` : "";
-    text += `<blockquote>${entry.icon} <b>${escapeHtml(entry.action)}</b>${detailsText}</blockquote>\n`;
+    const detailsText = entry.details ? ` ${formatter.escape(entry.details)}` : "";
+    text += `<blockquote>${entry.icon} <b>${formatter.escape(entry.action)}</b>${detailsText}</blockquote>\n`;
   }
 
   // Add waiting indicator if paused
@@ -128,12 +45,12 @@ function formatCaptainsLog(status: StatusMessage): string {
 
 /** Create a new Captain's Log */
 export async function createStatusMessage(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   initialAction = "Starting"
 ): Promise<StatusMessage> {
   // Clear any existing status message
-  await clearStatusMessage(bot, chatId);
+  await clearStatusMessage(adapter, chatId);
 
   const now = new Date();
   const initialEntry: LogEntry = {
@@ -144,7 +61,7 @@ export async function createStatusMessage(
 
   const status: StatusMessage = {
     messageId: 0, // Will be set after sending
-    chatId,
+    chatId: Number(chatId),
     startTime: now,
     entries: [initialEntry],
     isPaused: false,
@@ -152,33 +69,31 @@ export async function createStatusMessage(
     outputTokens: 0,
   };
 
-  const text = formatCaptainsLog(status);
-  const message = await bot.sendMessage(chatId, text, {
-    parse_mode: "HTML",
-    reply_markup: buildStopKeyboard(chatId),
-  });
+  const text = formatCaptainsLog(status, adapter.formatter);
+  const stopKeyboard = adapter.ui.buildStopButton(chatId);
 
-  status.messageId = message.message_id;
+  const message = await adapter.send(chatId, text, { rawKeyboard: stopKeyboard });
+  status.messageId = Number(message.messageId);
 
   // Start typing indicator interval
   status.typingInterval = setInterval(() => {
     if (!status.isPaused) {
-      bot.sendChatAction(chatId, "typing").catch(() => {});
+      adapter.sendTypingIndicator(chatId).catch(() => {});
     }
   }, TYPING_INTERVAL_MS);
 
   statusMessages.set(chatId, status);
 
   // Also send initial typing action
-  await bot.sendChatAction(chatId, "typing").catch(() => {});
+  await adapter.sendTypingIndicator(chatId).catch(() => {});
 
   return status;
 }
 
 /** Add a new entry to the Captain's Log */
 export async function updateStatusMessage(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   action: string,
   icon = "⚙️",
   details?: string
@@ -196,29 +111,25 @@ export async function updateStatusMessage(
   status.entries.push(entry);
 
   // Format and update the message
-  let text = formatCaptainsLog(status);
+  let text = formatCaptainsLog(status, adapter.formatter);
 
-  // Check Telegram limit - if too long, truncate older entries
+  // Check message limit - if too long, truncate older entries
   while (text.length > TELEGRAM_MESSAGE_LIMIT - 100 && status.entries.length > 5) {
     // Remove oldest entries (keep first "Starting" entry if possible)
     status.entries.splice(1, 1);
-    text = formatCaptainsLog(status);
+    text = formatCaptainsLog(status, adapter.formatter);
   }
 
   try {
-    await bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: status.messageId,
-      parse_mode: "HTML",
-      reply_markup: buildStopKeyboard(chatId),
-    });
+    const stopKeyboard = adapter.ui.buildStopButton(chatId);
+    await adapter.edit(chatId, String(status.messageId), text, { rawKeyboard: stopKeyboard });
   } catch {
     // Ignore edit errors (message unchanged or rate limited)
   }
 }
 
 /** Update token counts for the status message */
-export function updateTokens(chatId: number, inputTokens: number, outputTokens: number): void {
+export function updateTokens(chatId: string, inputTokens: number, outputTokens: number): void {
   const status = statusMessages.get(chatId);
   if (!status) return;
 
@@ -228,8 +139,8 @@ export function updateTokens(chatId: number, inputTokens: number, outputTokens: 
 
 /** Mark the log as paused (waiting for user input) */
 export async function pauseStatusMessage(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   reason = "Awaiting input"
 ): Promise<void> {
   const status = statusMessages.get(chatId);
@@ -245,15 +156,11 @@ export async function pauseStatusMessage(
   };
   status.entries.push(entry);
 
-  const text = formatCaptainsLog(status);
+  const text = formatCaptainsLog(status, adapter.formatter);
 
   try {
-    await bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: status.messageId,
-      parse_mode: "HTML",
-      reply_markup: buildStopKeyboard(chatId),
-    });
+    const stopKeyboard = adapter.ui.buildStopButton(chatId);
+    await adapter.edit(chatId, String(status.messageId), text, { rawKeyboard: stopKeyboard });
   } catch {
     // Ignore edit errors
   }
@@ -261,8 +168,8 @@ export async function pauseStatusMessage(
 
 /** Resume the log after user input */
 export async function resumeStatusMessage(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   action = "Resuming"
 ): Promise<void> {
   const status = statusMessages.get(chatId);
@@ -278,30 +185,26 @@ export async function resumeStatusMessage(
   };
   status.entries.push(entry);
 
-  const text = formatCaptainsLog(status);
+  const text = formatCaptainsLog(status, adapter.formatter);
 
   try {
-    await bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: status.messageId,
-      parse_mode: "HTML",
-      reply_markup: buildStopKeyboard(chatId),
-    });
+    const stopKeyboard = adapter.ui.buildStopButton(chatId);
+    await adapter.edit(chatId, String(status.messageId), text, { rawKeyboard: stopKeyboard });
   } catch {
     // Ignore edit errors
   }
 }
 
 /** Get the current status (for context) */
-export function getStatusActions(chatId: number): string[] {
+export function getStatusActions(chatId: string): string[] {
   const status = statusMessages.get(chatId);
   return status?.entries.map(e => `${e.icon} ${e.action}${e.details ? ` ${e.details}` : ""}`) || [];
 }
 
 /** Finalize the log with completion status (keeps message, stops updates) */
 export async function finalizeStatusMessage(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   success: boolean,
   summary?: string
 ): Promise<void> {
@@ -331,17 +234,12 @@ export async function finalizeStatusMessage(
   let text = `<b>Claude</b> · ${duration}${tokenDisplay} ${statusIcon}\n\n`;
 
   for (const e of status.entries) {
-    const detailsText = e.details ? ` ${escapeHtml(e.details)}` : "";
-    text += `<blockquote>${e.icon} <b>${escapeHtml(e.action)}</b>${detailsText}</blockquote>\n`;
+    const detailsText = e.details ? ` ${adapter.formatter.escape(e.details)}` : "";
+    text += `<blockquote>${e.icon} <b>${adapter.formatter.escape(e.action)}</b>${detailsText}</blockquote>\n`;
   }
 
   try {
-    await bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: status.messageId,
-      parse_mode: "HTML",
-      // Remove the stop button on completion
-    });
+    await adapter.edit(chatId, String(status.messageId), text);
   } catch {
     // Ignore edit errors
   }
@@ -352,8 +250,8 @@ export async function finalizeStatusMessage(
 
 /** Clear status message completely (delete from chat) */
 export async function clearStatusMessage(
-  bot: TelegramBot,
-  chatId: number
+  adapter: PlatformAdapter,
+  chatId: string
 ): Promise<void> {
   const status = statusMessages.get(chatId);
   if (!status) return;
@@ -365,7 +263,7 @@ export async function clearStatusMessage(
 
   // Delete the status message
   try {
-    await bot.deleteMessage(chatId, status.messageId);
+    await adapter.delete(chatId, String(status.messageId));
   } catch {
     // Message might already be deleted
   }
@@ -374,178 +272,52 @@ export async function clearStatusMessage(
 }
 
 // ============================================================================
-// Keyboard Builders
-// ============================================================================
-
-/** Build inline keyboard for tool approval */
-export function buildApprovalKeyboard(
-  approvalId: string
-): TelegramBot.InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [
-        { text: "Allow", callback_data: `approve_yes_${approvalId}` },
-        { text: "Allow All", callback_data: `approve_all_${approvalId}` },
-        { text: "Deny", callback_data: `approve_no_${approvalId}` },
-      ],
-    ],
-  };
-}
-
-/** Build inline keyboard for question options */
-export function buildQuestionKeyboard(
-  questionId: string,
-  options: Array<{ label: string }>,
-  multiSelect: boolean,
-  selectedOptions: Set<string> = new Set()
-): TelegramBot.InlineKeyboardMarkup {
-  const keyboard: TelegramBot.InlineKeyboardButton[][] = options.map(
-    (opt, idx) => [
-      {
-        text: multiSelect && selectedOptions.has(opt.label) ? `✓ ${opt.label}` : opt.label,
-        callback_data: `question_${questionId}_${idx}`,
-      },
-    ]
-  );
-
-  // Add "Other" option
-  keyboard.push([
-    { text: "Other (type answer)", callback_data: `question_${questionId}_other` },
-  ]);
-
-  // For multi-select, add "Done" button
-  if (multiSelect) {
-    keyboard.push([
-      { text: "Done", callback_data: `question_${questionId}_done` },
-    ]);
-  }
-
-  return { inline_keyboard: keyboard };
-}
-
-/** Build inline keyboard for session selection */
-export function buildSessionKeyboard(
-  selectionId: string,
-  sessions: Array<{ timestamp: number; preview: string; name?: string }>
-): TelegramBot.InlineKeyboardMarkup {
-  const keyboard: TelegramBot.InlineKeyboardButton[][] = sessions
-    .slice(0, 5)
-    .map((session, idx) => {
-      const date = new Date(session.timestamp);
-      const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      // Show name if available, otherwise truncated preview
-      const label = session.name
-        ? `${timeStr}: ${session.name.substring(0, 30)}`
-        : `${timeStr}: ${session.preview.substring(0, 25)}...`;
-      return [
-        {
-          text: label,
-          callback_data: `session_${selectionId}_${idx}`,
-        },
-      ];
-    });
-
-  keyboard.push([
-    { text: "✨ New Session", callback_data: `session_${selectionId}_new` },
-    { text: "Cancel", callback_data: `session_${selectionId}_cancel` },
-  ]);
-
-  return { inline_keyboard: keyboard };
-}
-
-// ============================================================================
 // Message Sending Helpers
 // ============================================================================
 
 /** Send a message, handling length limits and errors */
 export async function sendMessage(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   text: string,
-  options: TelegramBot.SendMessageOptions = {}
-): Promise<TelegramBot.Message | null> {
+  options?: { parseMode?: string }
+): Promise<{ messageId: string; chatId: string } | null> {
   if (!text.trim()) return null;
 
   try {
-    const chunks = splitText(text);
-    let lastMsg: TelegramBot.Message | null = null;
-
-    for (const chunk of chunks) {
-      lastMsg = await bot.sendMessage(chatId, chunk, options);
-    }
-
-    return lastMsg;
+    return await adapter.send(chatId, text, { richFormat: true });
   } catch (error) {
     console.error("Failed to send message:", error);
     return null;
   }
 }
 
-/** Convert Claude's markdown response to Telegram HTML */
-function formatClaudeResponse(text: string): string {
-  if (!text.trim()) return "";
-
-  let html = text;
-
-  // Escape HTML first (but preserve markdown)
-  html = html
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  // Convert markdown code blocks to HTML
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) => {
-    return `<pre>${code.trim()}</pre>`;
-  });
-
-  // Convert inline code
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-
-  // Convert bold (**text** or __text__)
-  html = html.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-  html = html.replace(/__([^_]+)__/g, "<b>$1</b>");
-
-  // Convert italic (*text* or _text_) - careful not to match inside words
-  html = html.replace(/(?<![*\w])\*([^*]+)\*(?![*\w])/g, "<i>$1</i>");
-  html = html.replace(/(?<![_\w])_([^_]+)_(?![_\w])/g, "<i>$1</i>");
-
-  return html;
-}
-
 /** Send completion message - finalizes log, sends response */
 export async function sendCompletionMessage(
-  bot: TelegramBot,
-  chatId: number,
-  text: string,
-  options: TelegramBot.SendMessageOptions = {}
-): Promise<TelegramBot.Message | null> {
+  adapter: PlatformAdapter,
+  chatId: string,
+  text: string
+): Promise<{ messageId: string; chatId: string } | null> {
   // Finalize the Captain's Log (keeps it visible with completion status)
-  await finalizeStatusMessage(bot, chatId, true);
+  await finalizeStatusMessage(adapter, chatId, true);
 
-  // Format response with nice styling (markdown -> HTML)
-  const formattedText = formatClaudeResponse(text);
+  // Format response with nice styling (markdown -> platform format)
+  const formattedText = adapter.formatter.formatResponse(text);
 
   // Send the actual response as a new message
-  const responseMsg = await sendMessage(bot, chatId, formattedText, {
-    ...options,
-    parse_mode: "HTML",
-  });
-
-  return responseMsg;
+  return await sendMessage(adapter, chatId, formattedText);
 }
 
 /** Send error message */
 export async function sendErrorMessage(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   error: string
 ): Promise<void> {
   // Finalize the Captain's Log with error status
-  await finalizeStatusMessage(bot, chatId, false, `Error: ${error}`);
+  await finalizeStatusMessage(adapter, chatId, false, `Error: ${error}`);
 
-  await sendMessage(bot, chatId, `<b>Error</b>: ${escapeHtml(error)}`, {
-    parse_mode: "HTML",
-  });
+  await sendMessage(adapter, chatId, `<b>Error</b>: ${adapter.formatter.escape(error)}`);
 }
 
 // ============================================================================
@@ -571,4 +343,33 @@ export function formatToolInput(toolName: string, toolInput: unknown): string {
   }
 
   return inputDisplay;
+}
+
+// ============================================================================
+// Keyboard Builder Delegates (for backwards compatibility)
+// ============================================================================
+
+/** Build inline keyboard for tool approval */
+export function buildApprovalKeyboard(adapter: PlatformAdapter, approvalId: string): unknown {
+  return adapter.ui.buildApprovalButtons(approvalId);
+}
+
+/** Build inline keyboard for question options */
+export function buildQuestionKeyboard(
+  adapter: PlatformAdapter,
+  questionId: string,
+  options: Array<{ label: string; description: string }>,
+  multiSelect: boolean,
+  selectedOptions?: Set<string>
+): unknown {
+  return adapter.ui.buildQuestionButtons(questionId, options, multiSelect, selectedOptions);
+}
+
+/** Build inline keyboard for session selection */
+export function buildSessionKeyboard(
+  adapter: PlatformAdapter,
+  selectionId: string,
+  sessions: Array<{ sessionId: string; timestamp: number; preview: string; name?: string }>
+): unknown {
+  return adapter.ui.buildSessionList(selectionId, sessions);
 }

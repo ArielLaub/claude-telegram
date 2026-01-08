@@ -1,5 +1,5 @@
 /**
- * Claudine Telegram Bot - Claude SDK Integration
+ * Claudine Bot - Claude SDK Integration
  *
  * Handles communication with Claude via the Agent SDK, including
  * context setup, tool handling, and response streaming.
@@ -7,7 +7,8 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
-import TelegramBot from "node-telegram-bot-api";
+import type { PlatformAdapter } from "./adapters/types.js";
+import { TelegramAdapter } from "./adapters/telegram/index.js";
 import {
   Question,
   PendingQuestion,
@@ -37,13 +38,13 @@ let questionCounter = 0;
 // System Context for Claude
 // ============================================================================
 
-/** Generate system context to help Claude format responses for Telegram */
-function getTelegramContext(workingDir: string): string {
-  return `You are Claudine, a Claude-powered assistant running as a Telegram bot on a Raspberry Pi.
+/** Generate system context to help Claude format responses */
+function getSystemContext(workingDir: string, platformName: string): string {
+  return `You are Claudine, a Claude-powered assistant running as a ${platformName} bot on a Raspberry Pi.
 
-UI Guidelines for Telegram:
-- Format responses for mobile Telegram chat (small screens)
-- Use Telegram Markdown: *bold*, _italic_, \`code\`, \`\`\`codeblock\`\`\`
+UI Guidelines for ${platformName}:
+- Format responses for mobile chat (small screens)
+- Use Markdown: *bold*, _italic_, \`code\`, \`\`\`codeblock\`\`\`
 - Prefer bullet points and short paragraphs over ASCII tables
 - Keep responses concise but complete - avoid unnecessary verbosity
 - For code snippets, use fenced code blocks with language hints
@@ -304,29 +305,26 @@ function formatToolAction(
 
 /** Request user approval for a sensitive tool */
 export async function requestToolApproval(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   toolName: string,
   toolInput: unknown
 ): Promise<boolean> {
   // Check if already auto-approved
-  if (session.isToolAutoApproved(chatId, toolName)) {
+  if (session.isToolAutoApproved(Number(chatId), toolName)) {
     return true;
   }
 
   const approvalId = `${chatId}_${Date.now()}`;
   const inputDisplay = ui.formatToolInput(toolName, toolInput);
 
-  const message = `<b>Tool Request: ${ui.escapeHtml(toolName)}</b>\n<pre>${ui.escapeHtml(inputDisplay)}</pre>`;
-  const keyboard = ui.buildApprovalKeyboard(approvalId);
+  const message = `<b>Tool Request: ${adapter.formatter.escape(toolName)}</b>\n<pre>${adapter.formatter.escape(inputDisplay)}</pre>`;
+  const keyboard = adapter.ui.buildApprovalButtons(approvalId);
 
-  await bot.sendMessage(chatId, message, {
-    parse_mode: "HTML",
-    reply_markup: keyboard,
-  });
+  await adapter.send(chatId, message, { rawKeyboard: keyboard });
 
   return new Promise((resolve) => {
-    pendingApprovals.set(approvalId, { chatId, resolve, toolName });
+    pendingApprovals.set(approvalId, { chatId: Number(chatId), resolve, toolName });
 
     // Timeout
     setTimeout(() => {
@@ -340,9 +338,9 @@ export async function requestToolApproval(
 
 /** Handle approval callback */
 export async function handleApprovalCallback(
-  bot: TelegramBot,
-  chatId: number,
-  messageId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
+  messageId: string,
   data: string
 ): Promise<boolean> {
   // Parse: approve_yes_<id>, approve_all_<id>, approve_no_<id>
@@ -353,29 +351,20 @@ export async function handleApprovalCallback(
   const approvalId = parts.slice(2).join("_");
   const approval = pendingApprovals.get(approvalId);
 
-  if (!approval || approval.chatId !== chatId) return false;
+  if (!approval || approval.chatId !== Number(chatId)) return false;
 
   pendingApprovals.delete(approvalId);
 
   if (action === "yes") {
     approval.resolve(true);
-    await bot.editMessageText(`Allowed: ${approval.toolName}`, {
-      chat_id: chatId,
-      message_id: messageId,
-    });
+    await adapter.edit(chatId, messageId, `Allowed: ${approval.toolName}`);
   } else if (action === "all") {
-    session.addAutoApprovedTool(chatId, approval.toolName);
+    session.addAutoApprovedTool(Number(chatId), approval.toolName);
     approval.resolve(true);
-    await bot.editMessageText(`Allowed all future: ${approval.toolName}`, {
-      chat_id: chatId,
-      message_id: messageId,
-    });
+    await adapter.edit(chatId, messageId, `Allowed all future: ${approval.toolName}`);
   } else {
     approval.resolve(false);
-    await bot.editMessageText(`Denied: ${approval.toolName}`, {
-      chat_id: chatId,
-      message_id: messageId,
-    });
+    await adapter.edit(chatId, messageId, `Denied: ${approval.toolName}`);
   }
 
   return true;
@@ -390,8 +379,8 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Ask user a question with button options */
 export async function askUserQuestion(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   questions: Question[]
 ): Promise<Record<string, string>> {
   const answers: Record<string, string> = {};
@@ -404,20 +393,17 @@ export async function askUserQuestion(
     const questionId = `${chatId}_${Date.now()}_${questionCounter}`;
 
     // Format message with question and option descriptions
-    let message = `<b>${ui.escapeHtml(q.header)}</b>\n\n${ui.escapeHtml(q.question)}\n`;
+    let message = `<b>${adapter.formatter.escape(q.header)}</b>\n\n${adapter.formatter.escape(q.question)}\n`;
     for (const opt of q.options) {
       if (opt.description) {
-        message += `\n• <b>${ui.escapeHtml(opt.label)}</b>: ${ui.escapeHtml(opt.description)}`;
+        message += `\n• <b>${adapter.formatter.escape(opt.label)}</b>: ${adapter.formatter.escape(opt.description)}`;
       }
     }
 
-    const keyboard = ui.buildQuestionKeyboard(questionId, q.options, q.multiSelect);
+    const keyboard = adapter.ui.buildQuestionButtons(questionId, q.options, q.multiSelect);
 
     try {
-      await bot.sendMessage(chatId, message, {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
+      await adapter.send(chatId, message, { rawKeyboard: keyboard });
     } catch (err) {
       console.error("Failed to send question message:", err);
       answers[q.header] = "Error sending question";
@@ -427,7 +413,7 @@ export async function askUserQuestion(
     // Wait for answer
     const answer = await new Promise<string>((resolve) => {
       pendingQuestions.set(questionId, {
-        chatId,
+        chatId: Number(chatId),
         resolve,
         multiSelect: q.multiSelect,
         selectedOptions: new Set(),
@@ -456,9 +442,9 @@ export async function askUserQuestion(
 
 /** Handle question callback */
 export async function handleQuestionCallback(
-  bot: TelegramBot,
-  chatId: number,
-  messageId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
+  messageId: string,
   data: string
 ): Promise<boolean> {
   try {
@@ -471,7 +457,7 @@ export async function handleQuestionCallback(
     const answerPart = parts.slice(4).join("_");
     const pending = pendingQuestions.get(questionId);
 
-    if (!pending || pending.chatId !== chatId) {
+    if (!pending || pending.chatId !== Number(chatId)) {
       console.log("Question callback: no pending question found for", questionId);
       return false;
     }
@@ -479,28 +465,33 @@ export async function handleQuestionCallback(
     if (answerPart === "other") {
       // User wants to type custom answer
       try {
-        await bot.editMessageText("Please type your answer:", {
-          chat_id: chatId,
-          message_id: messageId,
-        });
+        await adapter.edit(chatId, messageId, "Please type your answer:");
       } catch (e) {
         console.error("Failed to edit message for 'other':", e);
       }
 
-      // Set up one-time listener for next message
-      const listener = async (msg: TelegramBot.Message) => {
-        if (msg.chat.id === chatId && msg.text && !msg.text.startsWith("/")) {
-          bot.removeListener("message", listener);
-          pending.resolve(msg.text);
-          pendingQuestions.delete(questionId);
-        }
-      };
-      bot.on("message", listener);
+      // For Telegram, set up one-time listener for next message
+      // This is platform-specific - other platforms might handle this differently
+      if (adapter instanceof TelegramAdapter) {
+        const rawBot = adapter.getRawBot();
+        const listener = async (msg: { chat: { id: number }; text?: string }) => {
+          if (msg.chat.id === Number(chatId) && msg.text && !msg.text.startsWith("/")) {
+            rawBot.removeListener("message", listener);
+            pending.resolve(msg.text);
+            pendingQuestions.delete(questionId);
+          }
+        };
+        rawBot.on("message", listener);
 
-      // Clean up listener on timeout
-      setTimeout(() => {
-        bot.removeListener("message", listener);
-      }, QUESTION_TIMEOUT_MS);
+        // Clean up listener on timeout
+        setTimeout(() => {
+          rawBot.removeListener("message", listener);
+        }, QUESTION_TIMEOUT_MS);
+      } else {
+        // For other platforms, just resolve with a placeholder
+        pending.resolve("Custom input not supported on this platform");
+        pendingQuestions.delete(questionId);
+      }
 
       return true;
     }
@@ -511,10 +502,7 @@ export async function handleQuestionCallback(
       pending.resolve(selected || "None selected");
       pendingQuestions.delete(questionId);
       try {
-        await bot.editMessageText(`Selected: ${selected || "None"}`, {
-          chat_id: chatId,
-          message_id: messageId,
-        });
+        await adapter.edit(chatId, messageId, `Selected: ${selected || "None"}`);
       } catch (e) {
         console.error("Failed to edit message for 'done':", e);
       }
@@ -536,30 +524,27 @@ export async function handleQuestionCallback(
       }
 
       // Update button text to show selection state
-      const keyboard = ui.buildQuestionKeyboard(
+      const keyboard = adapter.ui.buildQuestionButtons(
         questionId,
         pending.options,
         pending.multiSelect,
         pending.selectedOptions
       );
 
-      try {
-        await bot.editMessageReplyMarkup(keyboard, {
-          chat_id: chatId,
-          message_id: messageId,
-        });
-      } catch (e) {
-        console.error("Failed to edit reply markup:", e);
+      // For Telegram, we need to edit reply markup specifically
+      if (adapter instanceof TelegramAdapter) {
+        try {
+          await adapter.editReplyMarkup(chatId, messageId, keyboard as any);
+        } catch (e) {
+          console.error("Failed to edit reply markup:", e);
+        }
       }
     } else {
       // Single select - resolve immediately
       pending.resolve(option.label);
       pendingQuestions.delete(questionId);
       try {
-        await bot.editMessageText(`Selected: ${option.label}`, {
-          chat_id: chatId,
-          message_id: messageId,
-        });
+        await adapter.edit(chatId, messageId, `Selected: ${option.label}`);
       } catch (e) {
         console.error("Failed to edit message for selection:", e);
       }
@@ -583,22 +568,22 @@ export interface QueryResult {
 
 /** Create a canUseTool callback for handling permissions and AskUserQuestion */
 function createCanUseTool(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   inPlanMode: boolean
 ): CanUseTool {
   return async (toolName, input, options) => {
-    // Handle AskUserQuestion specially - get answers from user via Telegram
+    // Handle AskUserQuestion specially - get answers from user
     if (toolName === "AskUserQuestion") {
       const questions = (input as { questions?: Question[] }).questions;
       if (questions && questions.length > 0) {
         // Pause the log while waiting for user input
-        await ui.pauseStatusMessage(bot, chatId, "Waiting for your answer...");
+        await ui.pauseStatusMessage(adapter, chatId, "Waiting for your answer...");
 
-        const answers = await askUserQuestion(bot, chatId, questions);
+        const answers = await askUserQuestion(adapter, chatId, questions);
 
         // Resume the log
-        await ui.resumeStatusMessage(bot, chatId, "Got answer, continuing...");
+        await ui.resumeStatusMessage(adapter, chatId, "Got answer, continuing...");
 
         // Return allow with the answers added to input
         return {
@@ -612,7 +597,7 @@ function createCanUseTool(
     // Handle sensitive tools - request approval
     if (SENSITIVE_TOOLS.includes(toolName) && !inPlanMode) {
       // Check if auto-approved
-      if (session.isToolAutoApproved(chatId, toolName)) {
+      if (session.isToolAutoApproved(Number(chatId), toolName)) {
         return {
           behavior: "allow" as const,
           updatedInput: input,
@@ -621,20 +606,20 @@ function createCanUseTool(
       }
 
       // Pause the log while waiting for approval
-      await ui.pauseStatusMessage(bot, chatId, `Approval needed: ${toolName}`);
+      await ui.pauseStatusMessage(adapter, chatId, `Approval needed: ${toolName}`);
 
-      const approved = await requestToolApproval(bot, chatId, toolName, input);
+      const approved = await requestToolApproval(adapter, chatId, toolName, input);
 
       // Resume the log with result
       if (approved) {
-        await ui.resumeStatusMessage(bot, chatId, `Approved: ${toolName}`);
+        await ui.resumeStatusMessage(adapter, chatId, `Approved: ${toolName}`);
         return {
           behavior: "allow" as const,
           updatedInput: input,
           toolUseID: options.toolUseID,
         };
       } else {
-        await ui.resumeStatusMessage(bot, chatId, `Denied: ${toolName}`);
+        await ui.resumeStatusMessage(adapter, chatId, `Denied: ${toolName}`);
         return {
           behavior: "deny" as const,
           message: `Tool ${toolName} was denied by user`,
@@ -654,29 +639,30 @@ function createCanUseTool(
 
 /** Execute a Claude query with the given prompt */
 export async function executeQuery(
-  bot: TelegramBot,
-  chatId: number,
+  adapter: PlatformAdapter,
+  chatId: string,
   prompt: string,
   workingDir: string
 ): Promise<QueryResult> {
-  const sessionId = session.getSessionId(chatId);
-  const inPlanMode = session.isPlanMode(chatId);
-  const verbosity = session.getVerbosity(chatId);
+  const numericChatId = Number(chatId);
+  const sessionId = session.getSessionId(numericChatId);
+  const inPlanMode = session.isPlanMode(numericChatId);
+  const verbosity = session.getVerbosity(numericChatId);
 
   // Create abort controller for this query
   const abortController = new AbortController();
-  queue.setAbortController(chatId, abortController);
+  queue.setAbortController(numericChatId, abortController);
 
   // Create status message
-  await ui.createStatusMessage(bot, chatId, "Starting...");
+  await ui.createStatusMessage(adapter, chatId, "Starting...");
 
   // Build effective prompt with plan mode prefix if needed
   const effectivePrompt = inPlanMode
     ? `[PLAN MODE - Do not make any changes. Only explore, analyze, and create a detailed plan for the following request. Explain what you would do step by step.]\n\n${prompt}`
     : prompt;
 
-  // Build system prompt with Telegram context
-  const systemPrompt = getTelegramContext(workingDir);
+  // Build system prompt with context
+  const systemPrompt = getSystemContext(workingDir, adapter.platformName);
 
   let responseText = "";
   let lastUpdateTime = 0;
@@ -689,7 +675,7 @@ export async function executeQuery(
         allowedTools: inPlanMode ? PLAN_MODE_TOOLS : ALL_TOOLS,
         permissionMode: inPlanMode ? "plan" : "default",
         systemPrompt,
-        canUseTool: createCanUseTool(bot, chatId, inPlanMode),
+        canUseTool: createCanUseTool(adapter, chatId, inPlanMode),
         env: {
           PATH: process.env.PATH || "/usr/bin:/usr/local/bin:/bin",
           HOME: process.env.HOME || "/home/pi",
@@ -706,9 +692,9 @@ export async function executeQuery(
 
       // Capture session ID
       if (message.type === "system" && message.subtype === "init") {
-        session.setSessionId(chatId, message.session_id);
+        session.setSessionId(numericChatId, message.session_id);
         // Save to history with first message preview
-        const preview = session.getFirstMessage(chatId) || prompt;
+        const preview = session.getFirstMessage(numericChatId) || prompt;
         session.addSessionToHistory(message.session_id, preview);
       }
 
@@ -722,7 +708,7 @@ export async function executeQuery(
             // Extract detailed description based on tool type and verbosity
             const { icon, action, details, skip } = formatToolAction(toolName, toolInput, verbosity);
             if (!skip) {
-              await ui.updateStatusMessage(bot, chatId, action, icon, details);
+              await ui.updateStatusMessage(adapter, chatId, action, icon, details);
             }
           }
 
@@ -738,7 +724,7 @@ export async function executeQuery(
               const lines = responseText.trim().split('\n').filter(l => l.trim());
               const lastLine = lines[lines.length - 1] || '';
               if (lastLine.length > 10) {
-                await ui.updateStatusMessage(bot, chatId, lastLine, "💭");
+                await ui.updateStatusMessage(adapter, chatId, lastLine, "💭");
               }
             }
           }
@@ -755,10 +741,10 @@ export async function executeQuery(
 
         if (message.subtype === "success") {
           // Send the final response
-          await ui.sendCompletionMessage(bot, chatId, responseText || "Done.");
+          await ui.sendCompletionMessage(adapter, chatId, responseText || "Done.");
           return { success: true };
         } else {
-          await ui.sendErrorMessage(bot, chatId, message.subtype);
+          await ui.sendErrorMessage(adapter, chatId, message.subtype);
           return { success: false, error: message.subtype };
         }
       }
@@ -771,15 +757,15 @@ export async function executeQuery(
 
     // Send any accumulated response
     if (responseText) {
-      await ui.sendCompletionMessage(bot, chatId, responseText);
+      await ui.sendCompletionMessage(adapter, chatId, responseText);
     }
 
     return { success: true };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    await ui.sendErrorMessage(bot, chatId, errorMessage);
+    await ui.sendErrorMessage(adapter, chatId, errorMessage);
     return { success: false, error: errorMessage };
   } finally {
-    queue.clearAbortController(chatId);
+    queue.clearAbortController(numericChatId);
   }
 }

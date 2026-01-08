@@ -1,11 +1,11 @@
 /**
- * Claudine Telegram Bot - Bot Core
+ * Claudine Bot - Core
  *
- * Main bot logic: message routing, callback handling, queue processing.
+ * Platform-agnostic bot logic: message routing, callback handling, queue processing.
  */
 
-import TelegramBot from "node-telegram-bot-api";
 import { BotConfig } from "./types.js";
+import type { PlatformAdapter, IncomingMessage, CallbackEvent } from "./adapters/types.js";
 import * as session from "./session.js";
 import * as queue from "./queue.js";
 import * as commands from "./commands.js";
@@ -17,35 +17,35 @@ import * as ui from "./ui.js";
 // ============================================================================
 
 export class ClaudineBot {
-  private bot: TelegramBot;
+  private adapter: PlatformAdapter;
   private config: BotConfig;
 
-  constructor(config: BotConfig) {
+  constructor(config: BotConfig, adapter: PlatformAdapter) {
     this.config = config;
-    this.bot = new TelegramBot(config.botToken, { polling: true });
+    this.adapter = adapter;
 
     this.setupHandlers();
   }
 
   /** Set up all event handlers */
   private setupHandlers(): void {
-    this.bot.on("message", this.handleMessage.bind(this));
-    this.bot.on("callback_query", this.handleCallbackQuery.bind(this));
+    this.adapter.onMessage(this.handleMessage.bind(this));
+    this.adapter.onCallback(this.handleCallbackQuery.bind(this));
   }
 
   /** Check if a chat is allowed */
-  private isAllowed(chatId: number): boolean {
-    return this.config.allowedChatIds.includes(chatId.toString());
+  private isAllowed(chatId: string): boolean {
+    return this.config.allowedChatIds.includes(chatId);
   }
 
   /** Handle incoming messages */
-  private async handleMessage(msg: TelegramBot.Message): Promise<void> {
-    const chatId = msg.chat.id;
+  private async handleMessage(msg: IncomingMessage): Promise<void> {
+    const chatId = msg.chatId;
     const text = msg.text;
 
     // Security check
     if (!this.isAllowed(chatId)) {
-      await this.bot.sendMessage(chatId, "Unauthorized.");
+      await this.adapter.send(chatId, "Unauthorized.");
       return;
     }
 
@@ -53,19 +53,20 @@ export class ClaudineBot {
 
     // Handle commands first
     if (text.startsWith("/")) {
-      const handled = await commands.routeCommand(this.bot, chatId, text);
+      const handled = await commands.routeCommand(this.adapter, chatId, text);
       if (handled) return;
       // Unknown command - fall through to treat as message
     }
 
     // Regular message - check if we're processing
-    if (queue.isProcessing(chatId)) {
+    const numericChatId = Number(chatId);
+    if (queue.isProcessing(numericChatId)) {
       // Queue the message instead of rejecting
-      queue.enqueueMessage(chatId, text, msg.message_id);
+      queue.enqueueMessage(numericChatId, text, Number(msg.messageId));
 
-      const queueLength = queue.getQueueLength(chatId);
+      const queueLength = queue.getQueueLength(numericChatId);
       await ui.sendMessage(
-        this.bot,
+        this.adapter,
         chatId,
         `Message queued (${queueLength} in queue). Use /stop to cancel.`
       );
@@ -73,25 +74,26 @@ export class ClaudineBot {
     }
 
     // Process this message (and any queued messages)
-    await this.processMessages(chatId, text, msg.message_id);
+    await this.processMessages(chatId, text, Number(msg.messageId));
   }
 
   /** Process a message (and any queued messages) */
   private async processMessages(
-    chatId: number,
+    chatId: string,
     initialText: string,
     messageId: number
   ): Promise<void> {
-    queue.setProcessing(chatId, true);
+    const numericChatId = Number(chatId);
+    queue.setProcessing(numericChatId, true);
 
     try {
       // Track first message for session preview (only if no session yet)
-      if (!session.getSessionId(chatId)) {
-        session.setFirstMessage(chatId, initialText);
+      if (!session.getSessionId(numericChatId)) {
+        session.setFirstMessage(numericChatId, initialText);
       }
 
       // Build the prompt - include any queued messages
-      const queuedMessages = queue.dequeueAllMessages(chatId);
+      const queuedMessages = queue.dequeueAllMessages(numericChatId);
 
       let prompt: string;
       if (queuedMessages.length > 0) {
@@ -106,32 +108,30 @@ export class ClaudineBot {
       }
 
       // Execute the query
-      await claude.executeQuery(this.bot, chatId, prompt, this.config.workingDir);
+      await claude.executeQuery(this.adapter, chatId, prompt, this.config.workingDir);
 
       // After processing, check if more messages were queued during execution
-      if (queue.hasQueuedMessages(chatId)) {
-        const newMessages = queue.dequeueAllMessages(chatId);
+      if (queue.hasQueuedMessages(numericChatId)) {
+        const newMessages = queue.dequeueAllMessages(numericChatId);
         const batchedPrompt = queue.batchMessages(newMessages);
 
         // Process the new batch
-        await claude.executeQuery(this.bot, chatId, batchedPrompt, this.config.workingDir);
+        await claude.executeQuery(this.adapter, chatId, batchedPrompt, this.config.workingDir);
       }
     } finally {
-      queue.setProcessing(chatId, false);
+      queue.setProcessing(numericChatId, false);
     }
   }
 
   /** Handle callback queries (button presses) */
-  private async handleCallbackQuery(query: TelegramBot.CallbackQuery): Promise<void> {
-    const chatId = query.message?.chat.id;
-    const messageId = query.message?.message_id;
+  private async handleCallbackQuery(query: CallbackEvent): Promise<void> {
+    const chatId = query.chatId;
+    const messageId = query.messageId;
     const data = query.data;
-
-    if (!chatId || !messageId || !data) return;
 
     // Security check
     if (!this.isAllowed(chatId)) {
-      await this.bot.answerCallbackQuery(query.id, { text: "Unauthorized" });
+      await this.adapter.answerCallback(query.id, "Unauthorized");
       return;
     }
 
@@ -140,23 +140,23 @@ export class ClaudineBot {
     // Route to appropriate handler based on prefix
     if (data.startsWith("stop_")) {
       // Handle stop button press
-      handled = await commands.handleStop(this.bot, chatId);
+      handled = await commands.handleStop(this.adapter, chatId);
     } else if (data.startsWith("approve_")) {
-      handled = await claude.handleApprovalCallback(this.bot, chatId, messageId, data);
+      handled = await claude.handleApprovalCallback(this.adapter, chatId, messageId, data);
     } else if (data.startsWith("question_")) {
-      handled = await claude.handleQuestionCallback(this.bot, chatId, messageId, data);
+      handled = await claude.handleQuestionCallback(this.adapter, chatId, messageId, data);
     } else if (data.startsWith("session_")) {
       handled = await this.handleSessionCallback(chatId, messageId, data);
     }
 
     // Acknowledge the callback
-    await this.bot.answerCallbackQuery(query.id);
+    await this.adapter.answerCallback(query.id);
   }
 
   /** Handle session selection callback */
   private async handleSessionCallback(
-    chatId: number,
-    messageId: number,
+    chatId: string,
+    messageId: string,
     data: string
   ): Promise<boolean> {
     // Parse: session_<chatId>_<timestamp>_<action>
@@ -166,19 +166,13 @@ export class ClaudineBot {
     const action = parts.slice(3).join("_");
 
     if (action === "cancel") {
-      await this.bot.editMessageText("Session selection cancelled.", {
-        chat_id: chatId,
-        message_id: messageId,
-      });
+      await this.adapter.edit(chatId, messageId, "Session selection cancelled.");
       return true;
     }
 
     if (action === "new") {
-      session.resetChatState(chatId);
-      await this.bot.editMessageText("✨ Started new session. Send a message to begin!", {
-        chat_id: chatId,
-        message_id: messageId,
-      });
+      session.resetChatState(Number(chatId));
+      await this.adapter.edit(chatId, messageId, "✨ Started new session. Send a message to begin!");
       return true;
     }
 
@@ -190,13 +184,13 @@ export class ClaudineBot {
     const sess = history[sessionIndex];
 
     if (sess) {
-      session.setSessionId(chatId, sess.sessionId);
+      session.setSessionId(Number(chatId), sess.sessionId);
       const date = new Date(sess.timestamp).toLocaleString();
-      await this.bot.editMessageText(`✅ Resumed session from ${date}\n<i>${ui.escapeHtml(sess.preview)}</i>`, {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "HTML",
-      });
+      await this.adapter.edit(
+        chatId,
+        messageId,
+        `✅ Resumed session from ${date}\n<i>${this.adapter.formatter.escape(sess.preview)}</i>`
+      );
       return true;
     }
 
@@ -205,16 +199,19 @@ export class ClaudineBot {
 
   /** Start the bot */
   start(): void {
-    console.log("Claudine Telegram Bot started!");
+    console.log(`Claudine Bot started! (${this.adapter.platformName})`);
     console.log(`Working directory: ${this.config.workingDir}`);
     console.log(`Allowed chat IDs: ${this.config.allowedChatIds.join(", ")}`);
 
-    // Register bot commands with Telegram menu
-    commands.registerBotCommands(this.bot);
+    // Start the adapter
+    this.adapter.start();
+
+    // Register bot commands (platform-specific)
+    commands.registerBotCommands(this.adapter);
 
     // Send startup message to all allowed chats
     for (const chatId of this.config.allowedChatIds) {
-      this.bot.sendMessage(chatId, "Claudine is online").catch((err) => {
+      this.adapter.send(chatId, "Claudine is online").catch((err) => {
         console.error(`Failed to send startup message to ${chatId}:`, err);
       });
     }
@@ -223,11 +220,11 @@ export class ClaudineBot {
   /** Stop the bot */
   stop(): void {
     console.log("Shutting down...");
-    this.bot.stopPolling();
+    this.adapter.stop();
   }
 
-  /** Get the underlying TelegramBot instance */
-  getBot(): TelegramBot {
-    return this.bot;
+  /** Get the adapter */
+  getAdapter(): PlatformAdapter {
+    return this.adapter;
   }
 }

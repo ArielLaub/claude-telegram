@@ -1,11 +1,13 @@
 /**
- * Claudine - A Claude-powered Telegram Bot
+ * Claudine - A Claude-powered Bot
  *
  * Entry point for the application.
+ * Supports multiple platforms via adapters.
  */
 
 import { ClaudineBot } from "./bot.js";
 import { BotConfig } from "./types.js";
+import { TelegramAdapter } from "./adapters/telegram/index.js";
 import { startCollector, stopCollector } from "./stats-collector.js";
 
 // ============================================================================
@@ -56,7 +58,12 @@ function loadConfig(): BotConfig {
 // ============================================================================
 
 const config = loadConfig();
-const bot = new ClaudineBot(config);
+
+// Create platform adapter (Telegram for now, could be configurable later)
+const adapter = new TelegramAdapter(config.botToken);
+
+// Create the bot with the adapter
+const bot = new ClaudineBot(config, adapter);
 
 // Start the stats collector
 startCollector();
