@@ -19,6 +19,14 @@ import { escapeHtml, TELEGRAM_MESSAGE_LIMIT, formatDuration, formatTokens } from
 /** Active status messages per chat */
 const statusMessages = new Map<string, StatusMessage>();
 
+/** Active task list messages per chat (editable in place) */
+interface TaskListMessage {
+  messageId: number;
+  chatId: string;
+  tasks: Array<{ content: string; status: string }>;
+}
+const taskListMessages = new Map<string, TaskListMessage>();
+
 /** Format the Captain's Log message with blockquote actions */
 function formatCaptainsLog(status: StatusMessage, formatter: PlatformAdapter["formatter"]): string {
   const duration = formatDuration(status.startTime);
@@ -272,6 +280,74 @@ export async function clearStatusMessage(
 }
 
 // ============================================================================
+// Task List Messages (editable in place)
+// ============================================================================
+
+/** Format task list for display */
+function formatTaskList(tasks: Array<{ content: string; status: string }>): string {
+  if (tasks.length === 0) return "";
+
+  const lines = tasks.map((t) => {
+    const checkbox = t.status === "completed" ? "✅" : t.status === "in_progress" ? "🔄" : "⬜";
+    const content = t.content.length > 45 ? t.content.substring(0, 45) + "..." : t.content;
+    return `${checkbox} ${content}`;
+  });
+
+  return `<b>📋 Tasks</b>\n${lines.join("\n")}`;
+}
+
+/** Update or create task list message (edits in place) */
+export async function updateTaskList(
+  adapter: PlatformAdapter,
+  chatId: string,
+  tasks: Array<{ content: string; status: string }>
+): Promise<void> {
+  const existing = taskListMessages.get(chatId);
+  const text = formatTaskList(tasks);
+
+  if (existing) {
+    // Update existing message in place
+    existing.tasks = tasks;
+    try {
+      await adapter.edit(chatId, String(existing.messageId), text);
+    } catch {
+      // Message might be deleted, create a new one
+      taskListMessages.delete(chatId);
+      await updateTaskList(adapter, chatId, tasks);
+    }
+  } else {
+    // Create new task list message
+    const message = await adapter.send(chatId, text, { richFormat: true });
+    taskListMessages.set(chatId, {
+      messageId: Number(message.messageId),
+      chatId,
+      tasks,
+    });
+  }
+}
+
+/** Clear task list message when done */
+export async function clearTaskList(
+  adapter: PlatformAdapter,
+  chatId: string
+): Promise<void> {
+  const existing = taskListMessages.get(chatId);
+  if (!existing) return;
+
+  try {
+    await adapter.delete(chatId, String(existing.messageId));
+  } catch {
+    // Already deleted
+  }
+  taskListMessages.delete(chatId);
+}
+
+/** Check if we have an active task list */
+export function hasTaskList(chatId: string): boolean {
+  return taskListMessages.has(chatId);
+}
+
+// ============================================================================
 // Message Sending Helpers
 // ============================================================================
 
@@ -301,6 +377,9 @@ export async function sendCompletionMessage(
   // Finalize the Captain's Log (keeps it visible with completion status)
   await finalizeStatusMessage(adapter, chatId, true);
 
+  // Clear the task list (if any) - operation is done
+  await clearTaskList(adapter, chatId);
+
   // Format response with nice styling (markdown -> platform format)
   const formattedText = adapter.formatter.formatResponse(text);
 
@@ -316,6 +395,9 @@ export async function sendErrorMessage(
 ): Promise<void> {
   // Finalize the Captain's Log with error status
   await finalizeStatusMessage(adapter, chatId, false, `Error: ${error}`);
+
+  // Clear the task list (if any)
+  await clearTaskList(adapter, chatId);
 
   await sendMessage(adapter, chatId, `<b>Error</b>: ${adapter.formatter.escape(error)}`);
 }

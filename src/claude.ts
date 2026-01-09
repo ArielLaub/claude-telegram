@@ -274,21 +274,9 @@ function formatToolAction(
     }
 
     case "TodoWrite": {
-      const todos = input.todos as Array<{ content: string; status: string }> | undefined;
-      if (verbosity === "low") {
-        return { icon: "📋", action: "Updating tasks" };
-      }
-      if (todos && todos.length > 0) {
-        // Show all tasks (no limit)
-        const taskLines = todos.map((t) => {
-          const checkbox = t.status === "completed" ? "✅" : t.status === "in_progress" ? "🔄" : "⬜";
-          const maxLen = verbosity === "high" ? 50 : 40;
-          const content = t.content.length > maxLen ? t.content.substring(0, maxLen) + "..." : t.content;
-          return `${checkbox} ${content}`;
-        });
-        return { icon: "📋", action: "Tasks", details: taskLines.join("\n") };
-      }
-      return { icon: "📋", action: "Updating tasks" };
+      // TodoWrite is handled specially - updates a separate editable message
+      // Return skip=true to avoid adding to Captain's Log
+      return { icon: "📋", action: "Updating tasks", skip: true };
     }
 
     case "AskUserQuestion":
@@ -704,6 +692,15 @@ export async function executeQuery(
           if (block.type === "tool_use") {
             const toolName = block.name;
             const toolInput = block.input as Record<string, unknown>;
+
+            // Special handling for TodoWrite - update separate editable message
+            if (toolName === "TodoWrite") {
+              const todos = toolInput.todos as Array<{ content: string; status: string }> | undefined;
+              if (todos && todos.length > 0) {
+                await ui.updateTaskList(adapter, chatId, todos);
+              }
+              continue; // Don't add to Captain's Log
+            }
 
             // Extract detailed description based on tool type and verbosity
             const { icon, action, details, skip } = formatToolAction(toolName, toolInput, verbosity);
