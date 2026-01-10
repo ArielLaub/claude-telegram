@@ -11,7 +11,7 @@ import * as fs from "fs";
 import * as https from "https";
 import type { PlatformAdapter } from "./adapters/types.js";
 import { TelegramAdapter } from "./adapters/telegram/index.js";
-import { COMMANDS, Command, VerbosityLevel } from "./types.js";
+import { COMMANDS, Command, VerbosityLevel, AVAILABLE_MODELS, ClaudeModel } from "./types.js";
 import * as session from "./session.js";
 import * as queue from "./queue.js";
 import * as ui from "./ui.js";
@@ -129,6 +129,8 @@ export async function handleStatus(adapter: PlatformAdapter, chatId: string): Pr
   const inPlanMode = session.isPlanMode(numericChatId);
   const queueLength = queue.getQueueLength(numericChatId);
   const isProc = queue.isProcessing(numericChatId);
+  const currentModel = session.getModel(numericChatId);
+  const modelInfo = AVAILABLE_MODELS.find(m => m.id === currentModel);
 
   // Get session name if available
   let sessionDisplay = "none";
@@ -143,6 +145,7 @@ export async function handleStatus(adapter: PlatformAdapter, chatId: string): Pr
 
   const message =
     `<b>Status</b>\n` +
+    `Model: ${modelInfo?.name || currentModel}\n` +
     `Session: ${ui.escapeHtml(sessionDisplay)}\n` +
     `Plan Mode: ${inPlanMode ? "Active" : "Off"}\n` +
     `Processing: ${isProc ? "Yes" : "No"}\n` +
@@ -570,6 +573,84 @@ export async function handleVerbose(
   return true;
 }
 
+// Store pending model selections
+const pendingModelSelections = new Map<
+  string,
+  {
+    chatId: number;
+    resolve: (model: ClaudeModel | null) => void;
+  }
+>();
+
+export async function handleModel(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  const numericChatId = Number(chatId);
+  const selectionId = `${chatId}_${Date.now()}`;
+  const currentModel = session.getModel(numericChatId);
+  const currentModelInfo = AVAILABLE_MODELS.find(m => m.id === currentModel);
+
+  // Build keyboard with model options
+  const keyboard = ui.buildModelKeyboard(adapter, selectionId, currentModel);
+
+  let message = `<b>Select Model</b>\n\nCurrent: <b>${currentModelInfo?.name || "Unknown"}</b>\n\n`;
+  for (const model of AVAILABLE_MODELS) {
+    message += `• <b>${model.name}</b>: ${model.description}\n`;
+  }
+
+  await adapter.send(chatId, message, { rawKeyboard: keyboard });
+
+  // Wait for selection
+  const newModel = await new Promise<ClaudeModel | null>((resolve) => {
+    pendingModelSelections.set(selectionId, { chatId: numericChatId, resolve });
+
+    // Timeout after 2 minutes
+    setTimeout(() => {
+      if (pendingModelSelections.has(selectionId)) {
+        pendingModelSelections.delete(selectionId);
+        resolve(null);
+      }
+    }, 2 * 60 * 1000);
+  });
+
+  if (newModel) {
+    session.setModel(numericChatId, newModel);
+  }
+  return true;
+}
+
+/** Handle model selection callback */
+export async function handleModelCallback(
+  adapter: PlatformAdapter,
+  chatId: string,
+  messageId: string,
+  data: string
+): Promise<boolean> {
+  // Parse: model_<chatId>_<timestamp>_<action>
+  const parts = data.split("_");
+  if (parts.length < 4) return false;
+
+  const selectionId = `${parts[1]}_${parts[2]}`;
+  const action = parts.slice(3).join("_");
+  const pending = pendingModelSelections.get(selectionId);
+
+  if (!pending || pending.chatId !== Number(chatId)) return false;
+
+  if (action === "cancel") {
+    pending.resolve(null);
+    pendingModelSelections.delete(selectionId);
+    await adapter.edit(chatId, messageId, "Model selection cancelled.");
+  } else {
+    const modelIndex = parseInt(action, 10);
+    const model = AVAILABLE_MODELS[modelIndex];
+    if (model) {
+      pending.resolve(model.id);
+      pendingModelSelections.delete(selectionId);
+      await adapter.edit(chatId, messageId, `Model changed to <b>${model.name}</b>`);
+    }
+  }
+
+  return true;
+}
+
 // ============================================================================
 // Platform Command Registration
 // ============================================================================
@@ -633,6 +714,8 @@ export async function routeCommand(
       return handleUsage(adapter, chatId);
     case "/verbose":
       return handleVerbose(adapter, chatId, args);
+    case "/model":
+      return handleModel(adapter, chatId);
     case "/restart":
       return handleRestart(adapter, chatId);
     default:

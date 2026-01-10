@@ -142,6 +142,9 @@ export interface UIBuilder {
 
   /** Build session selection list */
   buildSessionList(selectionId: string, sessions: StoredSessionInfo[]): unknown;
+
+  /** Build model selection list */
+  buildModelList(selectionId: string, currentModel: string): unknown;
 }
 
 // ============================================================================

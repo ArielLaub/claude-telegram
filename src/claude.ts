@@ -636,6 +636,7 @@ export async function executeQuery(
   const sessionId = session.getSessionId(numericChatId);
   const inPlanMode = session.isPlanMode(numericChatId);
   const verbosity = session.getVerbosity(numericChatId);
+  const model = session.getModel(numericChatId);
 
   // Create abort controller for this query
   const abortController = new AbortController();
@@ -660,6 +661,7 @@ export async function executeQuery(
       prompt: effectivePrompt,
       options: {
         cwd: workingDir,
+        model,
         allowedTools: inPlanMode ? PLAN_MODE_TOOLS : ALL_TOOLS,
         permissionMode: inPlanMode ? "plan" : "default",
         systemPrompt,

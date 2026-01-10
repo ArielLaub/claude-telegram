@@ -11,6 +11,8 @@ import {
   SessionHistory,
   ChatState,
   VerbosityLevel,
+  ClaudeModel,
+  DEFAULT_MODEL,
   MAX_STORED_SESSIONS,
 } from "./types.js";
 
@@ -108,6 +110,7 @@ export function getChatState(chatId: number): ChatState {
       planMode: false,
       autoApprovedTools: new Set(),
       verbosity: "normal",
+      model: DEFAULT_MODEL,
     });
   }
   return chatStates.get(chatId)!;
@@ -116,10 +119,12 @@ export function getChatState(chatId: number): ChatState {
 /** Reset chat state (for /new command) */
 export function resetChatState(chatId: number): void {
   const currentVerbosity = chatStates.get(chatId)?.verbosity || "normal";
+  const currentModel = chatStates.get(chatId)?.model || DEFAULT_MODEL;
   chatStates.set(chatId, {
     planMode: false,
     autoApprovedTools: new Set(),
     verbosity: currentVerbosity,  // Preserve verbosity across sessions
+    model: currentModel,  // Preserve model across sessions
   });
 }
 
@@ -188,4 +193,14 @@ export function setVerbosity(chatId: number, level: VerbosityLevel): void {
 /** Get verbosity level for a chat */
 export function getVerbosity(chatId: number): VerbosityLevel {
   return getChatState(chatId).verbosity || "normal";
+}
+
+/** Set model for a chat */
+export function setModel(chatId: number, model: ClaudeModel): void {
+  getChatState(chatId).model = model;
+}
+
+/** Get model for a chat */
+export function getModel(chatId: number): ClaudeModel {
+  return getChatState(chatId).model || DEFAULT_MODEL;
 }

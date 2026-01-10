@@ -111,6 +111,26 @@ export interface Command {
 /** Verbosity levels for tool output */
 export type VerbosityLevel = "low" | "normal" | "high";
 
+/** Available Claude models */
+export type ClaudeModel = "claude-sonnet-4-20250514" | "claude-opus-4-20250514" | "claude-haiku-3-5-20241022";
+
+/** Model definition with display info */
+export interface ModelInfo {
+  id: ClaudeModel;
+  name: string;
+  description: string;
+}
+
+/** Available models */
+export const AVAILABLE_MODELS: ModelInfo[] = [
+  { id: "claude-sonnet-4-20250514", name: "Sonnet 4", description: "Balanced performance & cost" },
+  { id: "claude-opus-4-20250514", name: "Opus 4", description: "Most capable, higher cost" },
+  { id: "claude-haiku-3-5-20241022", name: "Haiku 3.5", description: "Fast & economical" },
+];
+
+/** Default model */
+export const DEFAULT_MODEL: ClaudeModel = "claude-sonnet-4-20250514";
+
 /** Per-chat state tracking */
 export interface ChatState {
   sessionId?: string;
@@ -118,6 +138,7 @@ export interface ChatState {
   autoApprovedTools: Set<string>;
   firstMessage?: string;
   verbosity: VerbosityLevel;
+  model: ClaudeModel;
 }
 
 // ============================================================================
@@ -178,6 +199,7 @@ export const COMMANDS: Command[] = [
   { command: "/approve", description: "Approve and execute the plan", category: "mode" },
   { command: "/cancel", description: "Cancel plan mode", category: "mode" },
   { command: "/stop", description: "Stop current operation and clear queue", category: "mode" },
+  { command: "/model", description: "Change Claude model (Sonnet/Opus/Haiku)", category: "mode" },
 
   // System commands
   { command: "/help", description: "Show this help message", category: "system" },

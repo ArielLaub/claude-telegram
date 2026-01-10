@@ -6,6 +6,7 @@
 
 import TelegramBot from "node-telegram-bot-api";
 import type { UIBuilder, QuestionOption, StoredSessionInfo } from "../types.js";
+import { AVAILABLE_MODELS } from "../../types.js";
 
 /** Telegram implementation of UIBuilder */
 export class TelegramUIBuilder implements UIBuilder {
@@ -85,6 +86,27 @@ export class TelegramUIBuilder implements UIBuilder {
     keyboard.push([
       { text: "✨ New Session", callback_data: `session_${selectionId}_new` },
       { text: "Cancel", callback_data: `session_${selectionId}_cancel` },
+    ]);
+
+    return { inline_keyboard: keyboard };
+  }
+
+  /** Build model selection list */
+  buildModelList(
+    selectionId: string,
+    currentModel: string
+  ): TelegramBot.InlineKeyboardMarkup {
+    const keyboard: TelegramBot.InlineKeyboardButton[][] = AVAILABLE_MODELS.map(
+      (model, idx) => [
+        {
+          text: model.id === currentModel ? `✓ ${model.name}` : model.name,
+          callback_data: `model_${selectionId}_${idx}`,
+        },
+      ]
+    );
+
+    keyboard.push([
+      { text: "❌ Cancel", callback_data: `model_${selectionId}_cancel` },
     ]);
 
     return { inline_keyboard: keyboard };

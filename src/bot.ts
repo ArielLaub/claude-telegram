@@ -147,6 +147,8 @@ export class ClaudineBot {
       handled = await claude.handleQuestionCallback(this.adapter, chatId, messageId, data);
     } else if (data.startsWith("session_")) {
       handled = await this.handleSessionCallback(chatId, messageId, data);
+    } else if (data.startsWith("model_")) {
+      handled = await commands.handleModelCallback(this.adapter, chatId, messageId, data);
     }
 
     // Acknowledge the callback

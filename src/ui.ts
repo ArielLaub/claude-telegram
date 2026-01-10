@@ -455,3 +455,12 @@ export function buildSessionKeyboard(
 ): unknown {
   return adapter.ui.buildSessionList(selectionId, sessions);
 }
+
+/** Build inline keyboard for model selection */
+export function buildModelKeyboard(
+  adapter: PlatformAdapter,
+  selectionId: string,
+  currentModel: string
+): unknown {
+  return adapter.ui.buildModelList(selectionId, currentModel);
+}
