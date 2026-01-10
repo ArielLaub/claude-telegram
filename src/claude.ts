@@ -662,10 +662,47 @@ export async function executeQuery(
       options: {
         cwd: workingDir,
         model,
-        allowedTools: inPlanMode ? PLAN_MODE_TOOLS : ALL_TOOLS,
         permissionMode: inPlanMode ? "plan" : "default",
         systemPrompt,
         canUseTool: createCanUseTool(adapter, chatId, inPlanMode),
+        // IMPORTANT: Use PreToolUse hooks for permission handling instead of canUseTool.
+        // The canUseTool callback has a known bug where it gets bypassed in certain paths.
+        // Hooks fire FIRST in the permission flow: Hooks → Permission rules → Permission mode → canUseTool
+        // See: https://github.com/anthropics/claude-agent-sdk-typescript/issues/29
+        hooks: {
+          PreToolUse: [{
+            matcher: "", // Match all tools
+            hooks: [async (hookInput) => {
+              const toolName = (hookInput as { tool_name?: string }).tool_name || "";
+
+              // Skip permission check for non-sensitive tools or plan mode
+              if (!SENSITIVE_TOOLS.includes(toolName) || inPlanMode) {
+                return { continue: true };
+              }
+
+              // Check if auto-approved by user
+              if (session.isToolAutoApproved(Number(chatId), toolName)) {
+                return { continue: true };
+              }
+
+              // Request approval from user via Telegram
+              await ui.pauseStatusMessage(adapter, chatId, `Approval needed: ${toolName}`);
+              const toolInput = (hookInput as { tool_input?: unknown }).tool_input;
+              const approved = await requestToolApproval(adapter, chatId, toolName, toolInput);
+
+              if (approved) {
+                await ui.resumeStatusMessage(adapter, chatId, `Approved: ${toolName}`);
+                return { continue: true };
+              } else {
+                await ui.resumeStatusMessage(adapter, chatId, `Denied: ${toolName}`);
+                return {
+                  decision: "block" as const,
+                  reason: `Tool ${toolName} was denied by user`
+                };
+              }
+            }]
+          }]
+        },
         env: {
           PATH: process.env.PATH || "/usr/bin:/usr/local/bin:/bin",
           HOME: process.env.HOME || "/home/pi",

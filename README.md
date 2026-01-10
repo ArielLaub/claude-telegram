@@ -207,6 +207,23 @@ npx tsc --noEmit
 npm run build
 ```
 
+## 📝 Technical Notes
+
+### Tool Permission Handling
+
+The Claude Agent SDK has a known issue where the `canUseTool` callback gets bypassed in certain execution paths ([issue #29](https://github.com/anthropics/claude-agent-sdk-typescript/issues/29)).
+
+**Solution:** Use `PreToolUse` hooks instead of relying on `canUseTool`. Hooks fire **first** in the permission evaluation flow:
+
+```
+Hooks → Permission rules → Permission mode → canUseTool
+```
+
+This is implemented in `src/claude.ts` - see the `PreToolUse` hook configuration in `executeQuery()`. The hook:
+1. Checks if the tool is sensitive (Bash, Edit, Write, NotebookEdit)
+2. Checks if auto-approved by user
+3. Otherwise prompts for approval via Telegram
+
 ## 📄 License
 
 MIT - see [LICENSE](LICENSE)
