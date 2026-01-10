@@ -182,7 +182,7 @@ export class ClaudineBot {
     const sessionIndex = parseInt(action, 10);
     if (isNaN(sessionIndex)) return false;
 
-    const history = session.getSessionHistory();
+    const history = session.getSessionHistory(Number(chatId));
     const sess = history[sessionIndex];
 
     if (sess) {

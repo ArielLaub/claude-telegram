@@ -67,7 +67,7 @@ export async function handleSessions(
   adapter: PlatformAdapter,
   chatId: string
 ): Promise<{ handled: boolean; selectedSessionId?: string | null }> {
-  const history = session.getSessionHistory();
+  const history = session.getSessionHistory(Number(chatId));
 
   if (history.length === 0) {
     await ui.sendMessage(adapter, chatId, "No recent sessions found.");
@@ -95,7 +95,7 @@ export async function handleSessions(
 }
 
 export async function handleResume(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
-  const history = session.getSessionHistory();
+  const history = session.getSessionHistory(Number(chatId));
 
   if (history.length === 0) {
     await ui.sendMessage(adapter, chatId, "No recent sessions to resume. Use /new to start fresh.");

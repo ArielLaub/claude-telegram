@@ -11,6 +11,7 @@ import TelegramBot from "node-telegram-bot-api";
 /** Stored session metadata for history persistence */
 export interface StoredSession {
   sessionId: string;
+  chatId: number;  // Owner of this session
   timestamp: number;
   preview: string;
   name?: string;  // User-defined session name

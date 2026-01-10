@@ -2,7 +2,7 @@
 
 **Chat with Claude from your phone via Telegram.**
 
-Claudine turns a Raspberry Pi (or any Linux server) into a personal AI coding assistant you can message from anywhere. It's like having Claude Code in your pocket.
+Claudine turns any Linux server into a personal AI coding assistant you can message from anywhere. It's like having Claude Code in your pocket.
 
 ![Telegram](https://img.shields.io/badge/Telegram-Bot-blue?logo=telegram)
 ![Claude](https://img.shields.io/badge/Claude-Sonnet%204-orange)
@@ -16,36 +16,36 @@ Claudine turns a Raspberry Pi (or any Linux server) into a personal AI coding as
 - **Search the web** - Look up documentation, APIs, solutions
 - **Plan before acting** - Review what Claude wants to do before it does it
 - **Resume conversations** - Pick up where you left off
+- **Switch models** - Use Sonnet, Opus, or Haiku depending on the task
 
 All from your phone, anywhere you have internet.
 
-## 5-Minute Setup
+## Quick Setup
 
-### What You'll Need
+### Requirements
 
 | Requirement | Why |
 |-------------|-----|
-| **A server** | Raspberry Pi, VPS, old laptop - anything running Linux 24/7 |
+| **Linux server** | Any machine running 24/7 (VPS, home server, etc.) |
 | **Node.js 18+** | Run `node --version` to check |
 | **Claude subscription** | Max or Pro plan with CLI access |
-| **Telegram** | Free app, you probably have it |
+| **Telegram** | Free app |
 
-### Step 1: Create a Telegram Bot (2 min)
+### Step 1: Create a Telegram Bot
 
 1. Open Telegram and message **[@BotFather](https://t.me/BotFather)**
 2. Send `/newbot`
-3. Pick a name (e.g., "My Claude Bot")
-4. Pick a username (e.g., "my_claude_bot")
-5. **Copy the token** - looks like `123456789:ABCdefGHIjklMNO...`
+3. Pick a name and username
+4. **Copy the token** - looks like `123456789:ABCdefGHIjklMNO...`
 
-### Step 2: Get Your Chat ID (1 min)
+### Step 2: Get Your Chat ID
 
 1. Message **[@userinfobot](https://t.me/userinfobot)** on Telegram
 2. **Copy the number** it sends back (e.g., `1234567890`)
 
 This ID ensures only YOU can use your bot.
 
-### Step 3: Set Up Claude CLI (1 min)
+### Step 3: Set Up Claude CLI
 
 ```bash
 # Install Claude CLI
@@ -57,12 +57,12 @@ claude
 
 Follow the prompts to authenticate.
 
-### Step 4: Install Claudine (1 min)
+### Step 4: Install Claudine
 
 ```bash
 # Clone and enter directory
-git clone https://github.com/ariel-frischer/claudine-telegram.git
-cd claudine-telegram
+git clone git@github.com:ArielLaub/claude-telegram.git
+cd claude-telegram
 
 # Install dependencies
 npm install
@@ -71,40 +71,33 @@ npm install
 cp .env.example .env
 ```
 
-### Step 5: Add Your Tokens
+### Step 5: Configure
 
-Edit `.env` with nano, vim, or any editor:
-
-```bash
-nano .env
-```
-
-Fill in your values:
+Edit `.env`:
 
 ```bash
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...   # From Step 1
 TELEGRAM_CHAT_IDS=1234567890                 # From Step 2
-WORKING_DIR=/home/pi/projects                # Where Claude can work
+WORKING_DIR=/home/youruser/projects          # Where Claude can work
 ```
 
 ### Step 6: Run It
 
 ```bash
-# Start the bot
 npm start
 ```
 
-**That's it!** Open Telegram and message your bot. Say "Hello" to test it.
+Open Telegram and message your bot to test it.
 
-## Keeping It Running Forever
+## Running as a Service
 
-Want the bot to start automatically and run 24/7? Create a systemd service:
+To run Claudine 24/7, create a systemd service:
 
 ```bash
 sudo nano /etc/systemd/system/claudine.service
 ```
 
-Paste this (change `pi` and paths to match your setup):
+Paste this (adjust paths for your system):
 
 ```ini
 [Unit]
@@ -113,8 +106,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/claudine-telegram
+User=youruser
+WorkingDirectory=/home/youruser/claude-telegram
 ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=10
@@ -123,34 +116,54 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-Then enable it:
+Enable and start:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable claudine
 sudo systemctl start claudine
 
-# Check it's running
+# Check status
 sudo systemctl status claudine
 
 # View logs
 journalctl -u claudine -f
 ```
 
-## Bot Commands
+## Commands
 
-| Command | What it does |
-|---------|--------------|
-| `/new` | Start a fresh conversation |
-| `/sessions` | Browse past conversations |
-| `/resume` | Continue last conversation |
-| `/plan` | Make Claude plan before acting |
-| `/approve` | Execute the plan |
-| `/stop` | Stop current operation |
-| `/stats` | Show CPU/memory usage |
-| `/help` | List all commands |
+### Session
 
-## How Tool Approval Works
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a new conversation |
+| `/sessions` | List and resume recent sessions |
+| `/resume` | Resume the most recent session |
+| `/name <name>` | Name the current session |
+| `/status` | Show current session info |
+| `/clear` | Clear all session history |
+
+### Mode
+
+| Command | Description |
+|---------|-------------|
+| `/plan` | Enter plan mode (Claude explores without making changes) |
+| `/approve` | Approve and execute the plan |
+| `/cancel` | Cancel plan mode |
+| `/stop` | Stop current operation and clear queue |
+| `/model` | Change Claude model (Sonnet/Opus/Haiku) |
+
+### System
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all commands |
+| `/stats` | Show system stats (CPU, memory, temp) |
+| `/usage` | Show Claude API usage limits |
+| `/verbose <level>` | Set verbosity: `low`, `normal`, or `high` |
+| `/restart` | Restart the bot |
+
+## Tool Approval
 
 When Claude wants to run a command or edit a file, you'll see buttons:
 
@@ -160,44 +173,38 @@ When Claude wants to run a command or edit a file, you'll see buttons:
 
 This keeps you in control of what happens on your server.
 
-## Adding More Users
+## Multiple Users
 
-Want to let friends use your bot? Add their chat IDs:
+Add more chat IDs to allow others to use the bot:
 
 ```bash
 TELEGRAM_CHAT_IDS=123456789,987654321,555555555
 ```
 
-Each person gets their own separate conversation history.
+Each user gets their own separate conversation history and sessions.
 
 ## Troubleshooting
 
-### "Bot not responding"
+### Bot not responding
 
 1. Check it's running: `sudo systemctl status claudine`
 2. Check logs: `journalctl -u claudine -f`
 3. Make sure your chat ID is in `.env`
 
-### "Claude CLI not authenticated"
+### Claude CLI not authenticated
 
 Run `claude` in your terminal and log in again. The bot uses the same auth.
 
-### "Permission denied" errors
+### Permission denied errors
 
 Make sure your `WORKING_DIR` exists and is writable:
 
 ```bash
-mkdir -p /home/pi/projects
-chmod 755 /home/pi/projects
+mkdir -p /home/youruser/projects
+chmod 755 /home/youruser/projects
 ```
 
-## Technical Notes
-
-### Why PreToolUse Hooks?
-
-The Claude Agent SDK's `canUseTool` callback has a [known bug](https://github.com/anthropics/claude-agent-sdk-typescript/issues/29) where it gets bypassed. We use `PreToolUse` hooks instead, which reliably intercept all tool usage.
-
-### Architecture
+## Architecture
 
 ```
 src/
@@ -211,7 +218,7 @@ src/
 
 ## License
 
-MIT - do whatever you want with it.
+MIT
 
 ---
 

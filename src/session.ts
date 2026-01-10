@@ -48,7 +48,7 @@ export function saveSessionHistory(history: SessionHistory): void {
 }
 
 /** Add or update a session in history */
-export function addSessionToHistory(sessionId: string, preview: string): void {
+export function addSessionToHistory(chatId: number, sessionId: string, preview: string): void {
   const history = loadSessionHistory();
 
   // Remove if already exists (to update timestamp)
@@ -57,6 +57,7 @@ export function addSessionToHistory(sessionId: string, preview: string): void {
   // Add to front
   history.sessions.unshift({
     sessionId,
+    chatId,
     timestamp: Date.now(),
     preview: preview.substring(0, 100) + (preview.length > 100 ? "..." : ""),
   });
@@ -67,9 +68,9 @@ export function addSessionToHistory(sessionId: string, preview: string): void {
   saveSessionHistory(history);
 }
 
-/** Get all stored sessions */
-export function getSessionHistory(): StoredSession[] {
-  return loadSessionHistory().sessions;
+/** Get stored sessions for a specific chat */
+export function getSessionHistory(chatId: number): StoredSession[] {
+  return loadSessionHistory().sessions.filter((s) => s.chatId === chatId);
 }
 
 /** Clear all session history */
