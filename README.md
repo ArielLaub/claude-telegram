@@ -2,7 +2,7 @@
 
 **Chat with Claude from your phone via Telegram.**
 
-Claudine turns any Linux server into a personal AI coding assistant you can message from anywhere. It's like having Claude Code in your pocket.
+Claudine turns any Linux or macOS machine into a personal AI coding assistant you can message from anywhere. It's like having Claude Code in your pocket.
 
 ![Telegram](https://img.shields.io/badge/Telegram-Bot-blue?logo=telegram)
 ![Claude](https://img.shields.io/badge/Claude-Sonnet%204-orange)
@@ -26,7 +26,7 @@ All from your phone, anywhere you have internet.
 
 | Requirement | Why |
 |-------------|-----|
-| **Linux server** | Any machine running 24/7 (VPS, home server, etc.) |
+| **Linux or macOS** | Any machine running 24/7 (VPS, home server, Mac mini, etc.) |
 | **Node.js 18+** | Run `node --version` to check |
 | **Claude subscription** | Max or Pro plan with CLI access |
 | **Telegram** | Free app |
@@ -91,6 +91,8 @@ Open Telegram and message your bot to test it.
 
 ## Running as a Service
 
+### Linux (systemd)
+
 To run Claudine 24/7, create a systemd service:
 
 ```bash
@@ -129,6 +131,72 @@ sudo systemctl status claudine
 # View logs
 journalctl -u claudine -f
 ```
+
+### macOS (launchd)
+
+To run Claudine 24/7 on macOS, create a LaunchAgent. Replace `youruser` and the paths to match your setup, and make sure `npm` resolves on your `PATH` (Homebrew on Apple Silicon installs to `/opt/homebrew/bin`):
+
+```bash
+nano ~/Library/LaunchAgents/com.claudine.bot.plist
+```
+
+Paste this:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.claudine.bot</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/youruser/Development/claude-telegram</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/npm</string>
+    <string>start</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/youruser/Library/Logs/claudine.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/youruser/Library/Logs/claudine.err.log</string>
+</dict>
+</plist>
+```
+
+Load and start:
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.claudine.bot.plist
+
+# Check status
+launchctl list | grep claudine
+
+# View logs
+tail -f ~/Library/Logs/claudine.log
+
+# Stop / reload after edits
+launchctl unload ~/Library/LaunchAgents/com.claudine.bot.plist
+```
+
+> Note: a LaunchAgent runs while you're logged in. If you want the bot to keep running with the lid closed or after a reboot without login, either install it as a LaunchDaemon under `/Library/LaunchDaemons/` (requires `sudo`) or enable "Automatic login" + caffeinate.
 
 ## Commands
 
