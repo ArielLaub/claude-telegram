@@ -145,6 +145,17 @@ export interface UIBuilder {
 
   /** Build model selection list */
   buildModelList(selectionId: string, currentModel: string): unknown;
+
+  /**
+   * Generic single-pick list with a Cancel button. Callback data format:
+   *   `<prefix>_<selectionId>_<index>` or `<prefix>_<selectionId>_cancel`
+   */
+  buildPickerList(
+    prefix: string,
+    selectionId: string,
+    labels: string[],
+    cancelLabel?: string,
+  ): unknown;
 }
 
 // ============================================================================

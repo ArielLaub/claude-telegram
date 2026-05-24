@@ -119,13 +119,14 @@ export function getChatState(chatId: number): ChatState {
 
 /** Reset chat state (for /new command) */
 export function resetChatState(chatId: number): void {
-  const currentVerbosity = chatStates.get(chatId)?.verbosity || "normal";
-  const currentModel = chatStates.get(chatId)?.model || DEFAULT_MODEL;
+  const current = chatStates.get(chatId);
   chatStates.set(chatId, {
     planMode: false,
     autoApprovedTools: new Set(),
-    verbosity: currentVerbosity,  // Preserve verbosity across sessions
-    model: currentModel,  // Preserve model across sessions
+    verbosity: current?.verbosity || "normal",
+    model: current?.model || DEFAULT_MODEL,
+    activeProject: current?.activeProject,  // active project survives /new
+    // activeAgent is intentionally cleared — it's a one-shot pin
   });
 }
 
@@ -204,4 +205,24 @@ export function setModel(chatId: number, model: ClaudeModel): void {
 /** Get model for a chat */
 export function getModel(chatId: number): ClaudeModel {
   return getChatState(chatId).model || DEFAULT_MODEL;
+}
+
+/** Set the active project (full registry name, e.g. "alze-dev/admin-client"). */
+export function setActiveProject(chatId: number, projectName: string | undefined): void {
+  getChatState(chatId).activeProject = projectName;
+}
+
+/** Get the active project for a chat, if set. */
+export function getActiveProject(chatId: number): string | undefined {
+  return getChatState(chatId).activeProject;
+}
+
+/** Pin an agent for the next message. */
+export function setActiveAgent(chatId: number, agentName: string | undefined): void {
+  getChatState(chatId).activeAgent = agentName;
+}
+
+/** Get the pinned agent for a chat, if any. */
+export function getActiveAgent(chatId: number): string | undefined {
+  return getChatState(chatId).activeAgent;
 }

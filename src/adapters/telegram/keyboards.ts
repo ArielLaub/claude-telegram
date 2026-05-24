@@ -111,4 +111,20 @@ export class TelegramUIBuilder implements UIBuilder {
 
     return { inline_keyboard: keyboard };
   }
+
+  /** Generic single-pick list with a Cancel button. */
+  buildPickerList(
+    prefix: string,
+    selectionId: string,
+    labels: string[],
+    cancelLabel = "Cancel",
+  ): TelegramBot.InlineKeyboardMarkup {
+    const keyboard: TelegramBot.InlineKeyboardButton[][] = labels.map((label, idx) => [
+      { text: label, callback_data: `${prefix}_${selectionId}_${idx}` },
+    ]);
+    keyboard.push([
+      { text: `❌ ${cancelLabel}`, callback_data: `${prefix}_${selectionId}_cancel` },
+    ]);
+    return { inline_keyboard: keyboard };
+  }
 }

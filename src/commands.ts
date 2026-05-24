@@ -15,6 +15,8 @@ import { COMMANDS, Command, VerbosityLevel, AVAILABLE_MODELS, ClaudeModel } from
 import * as session from "./session.js";
 import * as queue from "./queue.js";
 import * as ui from "./ui.js";
+import * as projects from "./projects.js";
+import * as agents from "./agents.js";
 import { getHistogramData } from "./stats-collector.js";
 
 const execAsync = promisify(exec);
@@ -267,6 +269,211 @@ export async function handleStop(adapter: PlatformAdapter, chatId: string): Prom
   }
 
   await ui.sendMessage(adapter, chatId, message);
+  return true;
+}
+
+// ============================================================================
+// Project / Agent Commands
+// ============================================================================
+
+/** Pending picker selections (workspace child disambiguation). */
+const pendingProjectPicks = new Map<string, { chatId: number; candidates: projects.Project[] }>();
+
+export async function handleProjects(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  const loadErr = projects.getLoadError();
+  if (loadErr) {
+    await ui.sendMessage(adapter, chatId, `<b>Project registry not loaded</b>\n<i>${ui.escapeHtml(loadErr)}</i>`);
+    return true;
+  }
+
+  const active = session.getActiveProject(Number(chatId));
+  const topLevel = projects.listTopLevel();
+
+  if (topLevel.length === 0) {
+    await ui.sendMessage(
+      adapter,
+      chatId,
+      `<b>No projects registered</b>\n\nEdit <code>${ui.escapeHtml(projects.getRegistryPath())}</code> to add some.`,
+    );
+    return true;
+  }
+
+  let message = "<b>Projects</b>\n";
+  if (active) {
+    message += `<i>Active: ${ui.escapeHtml(active)}</i>\n`;
+  }
+  message += "\n";
+
+  for (const p of topLevel) {
+    const marker = p.name === active ? "▸ " : "• ";
+    message += `${marker}<b>${ui.escapeHtml(p.shortName)}</b>`;
+    if (p.tracker.type === "jira" && p.tracker.key) message += ` <code>${ui.escapeHtml(p.tracker.key)}</code>`;
+    message += "\n";
+    for (const childName of p.children) {
+      const child = projects.getProject(childName);
+      if (!child) continue;
+      const childMarker = child.name === active ? "  ▸ " : "  └ ";
+      message += `${childMarker}${ui.escapeHtml(child.shortName)}`;
+      if (child.tracker.type === "jira" && child.tracker.key) message += ` <code>${ui.escapeHtml(child.tracker.key)}</code>`;
+      message += "\n";
+    }
+  }
+
+  message += "\nUse <code>/project &lt;name&gt;</code> to switch.";
+  await ui.sendMessage(adapter, chatId, message);
+  return true;
+}
+
+export async function handleProject(
+  adapter: PlatformAdapter,
+  chatId: string,
+  ref?: string,
+): Promise<boolean> {
+  const numericChatId = Number(chatId);
+
+  if (!ref || !ref.trim()) {
+    const active = session.getActiveProject(numericChatId);
+    if (active) {
+      const p = projects.getProject(active);
+      await ui.sendMessage(
+        adapter,
+        chatId,
+        `<b>Active project:</b> ${ui.escapeHtml(active)}\n` +
+          (p ? `<i>${ui.escapeHtml(p.path)}</i>` : "<i>(not in registry)</i>") +
+          `\n\nUse <code>/project &lt;name&gt;</code> to switch, <code>/projects</code> to list.`,
+      );
+    } else {
+      await ui.sendMessage(
+        adapter,
+        chatId,
+        "<b>No active project.</b>\n\nUse <code>/projects</code> to list, then <code>/project &lt;name&gt;</code> to switch.",
+      );
+    }
+    return true;
+  }
+
+  const { project, ambiguous } = projects.resolve(ref.trim());
+
+  if (project) {
+    session.setActiveProject(numericChatId, project.name);
+    await ui.sendMessage(
+      adapter,
+      chatId,
+      `✅ Active project set to <b>${ui.escapeHtml(project.name)}</b>\n<i>${ui.escapeHtml(project.path)}</i>`,
+    );
+    return true;
+  }
+
+  if (ambiguous.length > 0) {
+    const selectionId = `${chatId}_${Date.now()}`;
+    pendingProjectPicks.set(selectionId, { chatId: numericChatId, candidates: ambiguous });
+    const labels = ambiguous.map(p => p.shortName);
+    const keyboard = adapter.ui.buildPickerList("proj", selectionId, labels);
+    await adapter.send(chatId, `<b>Which project?</b>\nMultiple matches for <code>${ui.escapeHtml(ref)}</code>:`, {
+      rawKeyboard: keyboard,
+    });
+    // Drop the picker if untouched for 2 minutes
+    setTimeout(() => pendingProjectPicks.delete(selectionId), 2 * 60 * 1000);
+    return true;
+  }
+
+  await ui.sendMessage(adapter, chatId, `No project matches <code>${ui.escapeHtml(ref)}</code>.`);
+  return true;
+}
+
+/** Handle "proj_<selectionId>_<index|cancel>" callbacks. */
+export async function handleProjectCallback(
+  adapter: PlatformAdapter,
+  chatId: string,
+  messageId: string,
+  data: string,
+): Promise<boolean> {
+  const parts = data.split("_");
+  if (parts.length < 4) return false;
+
+  const selectionId = `${parts[1]}_${parts[2]}`;
+  const action = parts.slice(3).join("_");
+  const pending = pendingProjectPicks.get(selectionId);
+  if (!pending || pending.chatId !== Number(chatId)) return false;
+
+  if (action === "cancel") {
+    pendingProjectPicks.delete(selectionId);
+    await adapter.edit(chatId, messageId, "Project selection cancelled.");
+    return true;
+  }
+
+  const idx = parseInt(action, 10);
+  const picked = pending.candidates[idx];
+  if (!picked) return false;
+
+  pendingProjectPicks.delete(selectionId);
+  session.setActiveProject(pending.chatId, picked.name);
+  await adapter.edit(
+    chatId,
+    messageId,
+    `✅ Active project set to <b>${ui.escapeHtml(picked.name)}</b>\n<i>${ui.escapeHtml(picked.path)}</i>`,
+  );
+  return true;
+}
+
+export async function handleAgents(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  const loadErr = agents.getLoadError();
+  if (loadErr) {
+    await ui.sendMessage(adapter, chatId, `<b>Agents directory not loaded</b>\n<i>${ui.escapeHtml(loadErr)}</i>`);
+    return true;
+  }
+
+  const pinned = session.getActiveAgent(Number(chatId));
+  const list = agents.listAgents();
+
+  if (list.length === 0) {
+    await ui.sendMessage(
+      adapter,
+      chatId,
+      `<b>No agents defined</b>\n\nAdd Markdown files to <code>${ui.escapeHtml(agents.getAgentsDir())}</code>.`,
+    );
+    return true;
+  }
+
+  let message = "<b>Agents</b>\n";
+  if (pinned) message += `<i>Pinned for next message: ${ui.escapeHtml(pinned)}</i>\n`;
+  message += "\n";
+
+  for (const agent of list) {
+    const marker = agent.name === pinned ? "▸ " : "• ";
+    message += `${marker}<b>${ui.escapeHtml(agent.name)}</b> — ${ui.escapeHtml(agent.description)}\n`;
+  }
+
+  message += "\nUse <code>/agent &lt;name&gt;</code> to pin one.";
+  await ui.sendMessage(adapter, chatId, message);
+  return true;
+}
+
+export async function handleAgent(
+  adapter: PlatformAdapter,
+  chatId: string,
+  name?: string,
+): Promise<boolean> {
+  const numericChatId = Number(chatId);
+
+  if (!name || !name.trim()) {
+    const pinned = session.getActiveAgent(numericChatId);
+    if (pinned) {
+      await ui.sendMessage(adapter, chatId, `<b>Pinned agent:</b> ${ui.escapeHtml(pinned)}\n\nUse <code>/agent &lt;name&gt;</code> to change, or <code>/agents</code> to list.`);
+    } else {
+      await ui.sendMessage(adapter, chatId, "<b>No agent pinned.</b>\n\nUse <code>/agents</code> to list, then <code>/agent &lt;name&gt;</code> to pin one.");
+    }
+    return true;
+  }
+
+  const agent = agents.getAgent(name.trim());
+  if (!agent) {
+    await ui.sendMessage(adapter, chatId, `No agent named <code>${ui.escapeHtml(name)}</code>. Try <code>/agents</code>.`);
+    return true;
+  }
+
+  session.setActiveAgent(numericChatId, agent.name);
+  await ui.sendMessage(adapter, chatId, `📌 Pinned <b>${ui.escapeHtml(agent.name)}</b> for the next message.`);
   return true;
 }
 
@@ -716,6 +923,14 @@ export async function routeCommand(
       return handleVerbose(adapter, chatId, args);
     case "/model":
       return handleModel(adapter, chatId);
+    case "/projects":
+      return handleProjects(adapter, chatId);
+    case "/project":
+      return handleProject(adapter, chatId, args);
+    case "/agents":
+      return handleAgents(adapter, chatId);
+    case "/agent":
+      return handleAgent(adapter, chatId, args);
     case "/restart":
       return handleRestart(adapter, chatId);
     default:

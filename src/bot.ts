@@ -4,6 +4,8 @@
  * Platform-agnostic bot logic: message routing, callback handling, queue processing.
  */
 
+import * as path from "path";
+import { fileURLToPath } from "url";
 import { BotConfig } from "./types.js";
 import type { PlatformAdapter, IncomingMessage, CallbackEvent } from "./adapters/types.js";
 import * as session from "./session.js";
@@ -11,6 +13,7 @@ import * as queue from "./queue.js";
 import * as commands from "./commands.js";
 import * as claude from "./claude.js";
 import * as ui from "./ui.js";
+import * as runtimeState from "./runtime-state.js";
 
 // ============================================================================
 // Bot Class
@@ -149,6 +152,8 @@ export class ClaudineBot {
       handled = await this.handleSessionCallback(chatId, messageId, data);
     } else if (data.startsWith("model_")) {
       handled = await commands.handleModelCallback(this.adapter, chatId, messageId, data);
+    } else if (data.startsWith("proj_")) {
+      handled = await commands.handleProjectCallback(this.adapter, chatId, messageId, data);
     }
 
     // Acknowledge the callback
@@ -211,11 +216,36 @@ export class ClaudineBot {
     // Register bot commands (platform-specific)
     commands.registerBotCommands(this.adapter);
 
-    // Send startup message to all allowed chats
-    for (const chatId of this.config.allowedChatIds) {
-      this.adapter.send(chatId, "Claudine is online").catch((err) => {
-        console.error(`Failed to send startup message to ${chatId}:`, err);
-      });
+    // Compare current git SHA to last-known to decide whether (and what) to announce.
+    // - SHA changed: send a one-line "Updated to <short>: <subject>"
+    // - SHA unchanged: stay silent. The user knows how to ping the bot if they want to check.
+    // - No git info (e.g. running outside a repo): fall back to the old greeting.
+    const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const git = runtimeState.getGitInfo(repoDir);
+    const prev = runtimeState.loadState();
+
+    if (!git) {
+      for (const chatId of this.config.allowedChatIds) {
+        this.adapter.send(chatId, "Claudine is online").catch((err) => {
+          console.error(`Failed to send startup message to ${chatId}:`, err);
+        });
+      }
+      return;
+    }
+
+    if (git.sha !== prev.gitSha) {
+      const message =
+        prev.gitSha
+          ? `🔄 Updated to <code>${git.shortSha}</code>: <i>${this.adapter.formatter.escape(git.subject)}</i>`
+          : `Claudine online at <code>${git.shortSha}</code>: <i>${this.adapter.formatter.escape(git.subject)}</i>`;
+      for (const chatId of this.config.allowedChatIds) {
+        this.adapter.send(chatId, message, { richFormat: true }).catch((err) => {
+          console.error(`Failed to send startup message to ${chatId}:`, err);
+        });
+      }
+      runtimeState.saveState({ gitSha: git.sha, gitSubject: git.subject });
+    } else {
+      console.log(`Same git SHA as last run (${git.shortSha}); skipping startup message.`);
     }
   }
 

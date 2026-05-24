@@ -134,7 +134,7 @@ journalctl -u claudine -f
 
 ### macOS (launchd)
 
-To run Claudine 24/7 on macOS, create a LaunchAgent. Replace `youruser` and the paths to match your setup, and make sure `npm` resolves on your `PATH` (Homebrew on Apple Silicon installs to `/opt/homebrew/bin`):
+To run Claudine 24/7 on macOS, create a LaunchAgent. Replace `youruser` with your username. This recipe shells out via `zsh -l` so it picks up your existing PATH/nvm setup — works whether you installed Node via Homebrew, nvm, fnm, or volta.
 
 ```bash
 nano ~/Library/LaunchAgents/com.claudine.bot.plist
@@ -151,26 +151,22 @@ Paste this:
   <key>Label</key>
   <string>com.claudine.bot</string>
 
-  <key>WorkingDirectory</key>
-  <string>/Users/youruser/Development/claude-telegram</string>
-
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/homebrew/bin/npm</string>
-    <string>start</string>
+    <string>/bin/zsh</string>
+    <string>-l</string>
+    <string>-c</string>
+    <string>cd /Users/youruser/Development/claude-telegram &amp;&amp; exec npm start</string>
   </array>
-
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-  </dict>
 
   <key>RunAtLoad</key>
   <true/>
 
   <key>KeepAlive</key>
   <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
 
   <key>StandardOutPath</key>
   <string>/Users/youruser/Library/Logs/claudine.log</string>

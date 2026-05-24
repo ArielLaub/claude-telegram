@@ -140,6 +140,10 @@ export interface ChatState {
   firstMessage?: string;
   verbosity: VerbosityLevel;
   model: ClaudeModel;
+  /** Full name of the active project from the registry (e.g. "alze-dev/admin-client"). */
+  activeProject?: string;
+  /** Name of the agent pinned for the next message, if any. */
+  activeAgent?: string;
 }
 
 // ============================================================================
@@ -201,6 +205,10 @@ export const COMMANDS: Command[] = [
   { command: "/cancel", description: "Cancel plan mode", category: "mode" },
   { command: "/stop", description: "Stop current operation and clear queue", category: "mode" },
   { command: "/model", description: "Change Claude model (Sonnet/Opus/Haiku)", category: "mode" },
+  { command: "/projects", description: "List registered projects", category: "mode" },
+  { command: "/project", description: "Switch active project (or show it)", category: "mode" },
+  { command: "/agents", description: "List available agents", category: "mode" },
+  { command: "/agent", description: "Pin an agent for the next message", category: "mode" },
 
   // System commands
   { command: "/help", description: "Show this help message", category: "system" },
