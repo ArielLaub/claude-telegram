@@ -126,6 +126,23 @@ export async function startWork(
       ? `**Figma**:\n${figmaUrls.map(u => `- ${u}`).join("\n")}`
       : "";
 
+  // Workspace navigation hint — only when the project has sub-repos.
+  const isWorkspace = project.subRepos.length > 0;
+  const workspaceBlock = isWorkspace
+    ? [
+        "### Workspace layout",
+        `\`${project.path}\` is a workspace containing these nested git repos:`,
+        ...project.subRepos.map(r => `- \`${r}/\``),
+        "",
+        "Each sub-repo has its own git history, branch, and remote. The ticket may touch one of them, or several. Your job:",
+        "1. Read the description and use Grep/Glob across the workspace to identify which sub-repo(s) the change belongs in.",
+        "2. For every sub-repo you modify, work on its own branch — same name in every affected repo so they're easy to follow.",
+        "3. Open one PR per affected sub-repo. Print every PR URL at the end.",
+        "4. If you're unsure which sub-repo the work belongs in, stop and ask via AskUserQuestion rather than guessing.",
+        "",
+      ]
+    : [];
+
   const prompt = [
     agent.systemPrompt,
     "",
@@ -147,17 +164,18 @@ export async function startWork(
     ticket.descriptionText.trim() || "_(no description provided)_",
     "",
     "### Working environment",
-    `- Repo: \`${project.path}\``,
-    `- Branch to create: \`${branchName}\` (off latest \`origin/main\`)`,
+    `- Project root: \`${project.path}\``,
+    `- Branch name to use (in each affected repo): \`${branchName}\` (off the repo's latest \`origin/main\` or \`origin/master\`)`,
     project.sensitivePaths.length > 0
       ? `- Sensitive paths (require explicit user approval before touching): ${project.sensitivePaths.map(p => `\`${p}\``).join(", ")}`
       : "",
     "",
+    ...workspaceBlock,
     "### When you finish",
-    "1. Make sure tests pass.",
-    "2. Push the branch and run `gh pr create --fill` to open a PR. The PR title and body should reflect the change.",
-    "3. Print the PR URL on its own line so it's easy to spot.",
-    "4. Summarize what you changed and why.",
+    "1. Make sure tests pass in every sub-repo you touched.",
+    "2. Push each branch and run `gh pr create --fill` to open a PR. The PR title and body should reflect the change.",
+    "3. Print every PR URL on its own line so they're easy to spot.",
+    "4. Summarize what you changed and why, naming each sub-repo if more than one was touched.",
     "",
     "If the ticket is ambiguous or a decision falls outside the description, stop and ask using your tools rather than guessing.",
   ]
@@ -166,14 +184,15 @@ export async function startWork(
 
   // ── Announce, then dispatch ────────────────────────────────────────────
   const figmaBadge = figmaUrls.length > 0 ? ` · 🎨 ${figmaUrls.length} Figma link${figmaUrls.length === 1 ? "" : "s"}` : "";
+  const workspaceBadge = isWorkspace ? ` · 🗂 ${project.subRepos.length} sub-repos` : "";
   await ui.sendMessage(
     adapter,
     chatId,
     `<b>🚧 Starting ${ui.escapeHtml(ticket.key)}</b>\n` +
       `<i>${ui.escapeHtml(ticket.summary)}</i>\n\n` +
-      `Agent: <code>${ui.escapeHtml(agentName)}</code>${figmaBadge}\n` +
-      `Repo: <code>${ui.escapeHtml(project.path)}</code>\n` +
-      `Branch: <code>${ui.escapeHtml(branchName)}</code>`,
+      `Agent: <code>${ui.escapeHtml(agentName)}</code>${figmaBadge}${workspaceBadge}\n` +
+      `Project: <code>${ui.escapeHtml(project.name)}</code>\n` +
+      `Branch (per affected repo): <code>${ui.escapeHtml(branchName)}</code>`,
   );
 
   await claude.executeQuery(adapter, chatId, prompt, project.path);

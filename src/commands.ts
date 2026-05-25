@@ -278,7 +278,7 @@ export async function handleStop(adapter: PlatformAdapter, chatId: string): Prom
 // Project / Agent Commands
 // ============================================================================
 
-/** Pending picker selections (workspace child disambiguation). */
+/** Pending picker selections for /project. */
 const pendingProjectPicks = new Map<string, { chatId: number; candidates: projects.Project[] }>();
 
 export async function handleProjects(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
@@ -289,9 +289,9 @@ export async function handleProjects(adapter: PlatformAdapter, chatId: string): 
   }
 
   const active = session.getActiveProject(Number(chatId));
-  const topLevel = projects.listTopLevel();
+  const list = projects.listProjects();
 
-  if (topLevel.length === 0) {
+  if (list.length === 0) {
     await ui.sendMessage(
       adapter,
       chatId,
@@ -306,19 +306,12 @@ export async function handleProjects(adapter: PlatformAdapter, chatId: string): 
   }
   message += "\n";
 
-  for (const p of topLevel) {
+  for (const p of list) {
     const marker = p.name === active ? "▸ " : "• ";
-    message += `${marker}<b>${ui.escapeHtml(p.shortName)}</b>`;
+    message += `${marker}<b>${ui.escapeHtml(p.name)}</b>`;
     if (p.tracker.type === "jira" && p.tracker.key) message += ` <code>${ui.escapeHtml(p.tracker.key)}</code>`;
+    if (p.subRepos.length > 0) message += ` <i>(${p.subRepos.length} sub-repos)</i>`;
     message += "\n";
-    for (const childName of p.children) {
-      const child = projects.getProject(childName);
-      if (!child) continue;
-      const childMarker = child.name === active ? "  ▸ " : "  └ ";
-      message += `${childMarker}${ui.escapeHtml(child.shortName)}`;
-      if (child.tracker.type === "jira" && child.tracker.key) message += ` <code>${ui.escapeHtml(child.tracker.key)}</code>`;
-      message += "\n";
-    }
   }
 
   message += "\nUse <code>/project &lt;name&gt;</code> to switch.";
@@ -334,9 +327,8 @@ export async function handleProject(
   const numericChatId = Number(chatId);
 
   if (!ref || !ref.trim()) {
-    // No arg → open a picker of every switchable project (leaves + standalones).
-    // Workspaces themselves aren't picker entries — their children are.
-    const candidates = projects.listProjects().filter(p => p.children.length === 0);
+    // No arg → picker of every project.
+    const candidates = projects.listProjects();
 
     if (candidates.length === 0) {
       await ui.sendMessage(
@@ -379,7 +371,7 @@ export async function handleProject(
   if (ambiguous.length > 0) {
     const selectionId = `${chatId}_${Date.now()}`;
     pendingProjectPicks.set(selectionId, { chatId: numericChatId, candidates: ambiguous });
-    const labels = ambiguous.map(p => p.shortName);
+    const labels = ambiguous.map(p => p.name);
     const keyboard = adapter.ui.buildPickerList("proj", selectionId, labels);
     await adapter.send(chatId, `<b>Which project?</b>\nMultiple matches for <code>${ui.escapeHtml(ref)}</code>:`, {
       rawKeyboard: keyboard,
