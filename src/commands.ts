@@ -333,23 +333,33 @@ export async function handleProject(
   const numericChatId = Number(chatId);
 
   if (!ref || !ref.trim()) {
-    const active = session.getActiveProject(numericChatId);
-    if (active) {
-      const p = projects.getProject(active);
+    // No arg → open a picker of every switchable project (leaves + standalones).
+    // Workspaces themselves aren't picker entries — their children are.
+    const candidates = projects.listProjects().filter(p => p.children.length === 0);
+
+    if (candidates.length === 0) {
       await ui.sendMessage(
         adapter,
         chatId,
-        `<b>Active project:</b> ${ui.escapeHtml(active)}\n` +
-          (p ? `<i>${ui.escapeHtml(p.path)}</i>` : "<i>(not in registry)</i>") +
-          `\n\nUse <code>/project &lt;name&gt;</code> to switch, <code>/projects</code> to list.`,
+        `<b>No projects registered.</b>\n\nEdit <code>${ui.escapeHtml(projects.getRegistryPath())}</code> to add some.`,
       );
-    } else {
-      await ui.sendMessage(
-        adapter,
-        chatId,
-        "<b>No active project.</b>\n\nUse <code>/projects</code> to list, then <code>/project &lt;name&gt;</code> to switch.",
-      );
+      return true;
     }
+
+    const active = session.getActiveProject(numericChatId);
+    const selectionId = `${chatId}_${Date.now()}`;
+    pendingProjectPicks.set(selectionId, { chatId: numericChatId, candidates });
+
+    // Show fully-qualified names so children of different workspaces don't collide.
+    // Mark the active one with a check.
+    const labels = candidates.map(p => (p.name === active ? `✓ ${p.name}` : p.name));
+    const keyboard = adapter.ui.buildPickerList("proj", selectionId, labels);
+
+    const header = active
+      ? `<b>Switch project</b>\nCurrent: <code>${ui.escapeHtml(active)}</code>`
+      : "<b>Pick a project</b>";
+    await adapter.send(chatId, header, { rawKeyboard: keyboard });
+    setTimeout(() => pendingProjectPicks.delete(selectionId), 2 * 60 * 1000);
     return true;
   }
 
