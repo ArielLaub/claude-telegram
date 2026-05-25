@@ -18,6 +18,7 @@ import * as ui from "./ui.js";
 import * as projects from "./projects.js";
 import * as agents from "./agents.js";
 import * as digest from "./digest.js";
+import * as work from "./work.js";
 import { getHistogramData } from "./stats-collector.js";
 
 const execAsync = promisify(exec);
@@ -462,6 +463,23 @@ export async function handleAgents(adapter: PlatformAdapter, chatId: string): Pr
 
 export async function handleDigest(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
   await digest.showFullQueue(adapter, chatId);
+  return true;
+}
+
+export async function handleWork(
+  adapter: PlatformAdapter,
+  chatId: string,
+  ticketKey?: string,
+): Promise<boolean> {
+  if (!ticketKey || !ticketKey.trim()) {
+    await ui.sendMessage(
+      adapter,
+      chatId,
+      "<b>Usage:</b> <code>/work &lt;ticket-key&gt;</code>\n\nExample: <code>/work ONIT-411</code>\n\nThe ticket runs against your active project (see <code>/project</code>). Pin a non-default agent first with <code>/agent &lt;name&gt;</code> if needed (default is <code>ui-expert</code>).",
+    );
+    return true;
+  }
+  await work.startWork(adapter, chatId, ticketKey.trim());
   return true;
 }
 
@@ -949,6 +967,8 @@ export async function routeCommand(
       return handleAgent(adapter, chatId, args);
     case "/digest":
       return handleDigest(adapter, chatId);
+    case "/work":
+      return handleWork(adapter, chatId, args);
     case "/restart":
       return handleRestart(adapter, chatId);
     default:

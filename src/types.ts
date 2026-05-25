@@ -210,6 +210,7 @@ export const COMMANDS: Command[] = [
   { command: "/agents", description: "List available agents", category: "mode" },
   { command: "/agent", description: "Pin an agent for the next message", category: "mode" },
   { command: "/digest", description: "Show your Jira queue", category: "mode" },
+  { command: "/work", description: "Start work on a Jira ticket (e.g. /work ONIT-411)", category: "mode" },
 
   // System commands
   { command: "/help", description: "Show this help message", category: "system" },

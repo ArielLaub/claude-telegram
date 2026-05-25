@@ -30,6 +30,15 @@ export interface JiraIssue {
   projectKey: string;
 }
 
+export interface JiraIssueDetailed extends JiraIssue {
+  /** Description rendered to plain text from Atlassian Document Format. */
+  descriptionText: string;
+  /** Jira issue type name: "Bug", "Story", "Task", etc. */
+  issueType: string;
+  labels: string[];
+  components: string[];
+}
+
 // ============================================================================
 // Config
 // ============================================================================
@@ -154,4 +163,86 @@ export async function getCurrentUser(): Promise<{ accountId: string; emailAddres
   const cfg = readConfig();
   if (!cfg) throw new Error("Jira not configured");
   return request<{ accountId: string; emailAddress: string; displayName: string }>(cfg, "/rest/api/3/myself");
+}
+
+interface RawIssueDetailed {
+  key: string;
+  fields: {
+    summary?: string;
+    status?: { name?: string; statusCategory?: { name?: string } };
+    priority?: { name?: string };
+    updated?: string;
+    project?: { key?: string };
+    issuetype?: { name?: string };
+    description?: unknown;
+    labels?: string[];
+    components?: { name?: string }[];
+  };
+}
+
+/** Fetch one issue with full description + classification fields. */
+export async function getIssue(key: string): Promise<JiraIssueDetailed> {
+  const cfg = readConfig();
+  if (!cfg) throw new Error("Jira not configured");
+
+  const params = new URLSearchParams({
+    fields: "summary,status,priority,updated,project,issuetype,description,labels,components",
+  });
+  const it = await request<RawIssueDetailed>(cfg, `/rest/api/3/issue/${encodeURIComponent(key)}?${params}`);
+
+  return {
+    key: it.key,
+    summary: it.fields.summary ?? "",
+    statusName: it.fields.status?.name ?? "Unknown",
+    statusCategory: it.fields.status?.statusCategory?.name ?? "Unknown",
+    priority: it.fields.priority?.name,
+    updated: it.fields.updated ?? "",
+    url: `https://${cfg.site}/browse/${it.key}`,
+    projectKey: it.fields.project?.key ?? "",
+    issueType: it.fields.issuetype?.name ?? "",
+    descriptionText: adfToPlainText(it.fields.description),
+    labels: it.fields.labels ?? [],
+    components: (it.fields.components ?? []).map(c => c.name ?? "").filter(Boolean),
+  };
+}
+
+/**
+ * Flatten Atlassian Document Format (rich text JSON) into plain text.
+ * Handles the common nodes (paragraph, text, heading, listItem) — anything
+ * fancier (mentions, embeds) is rendered as best-effort text.
+ */
+export function adfToPlainText(node: unknown): string {
+  if (node == null) return "";
+  if (typeof node === "string") return node;
+  if (typeof node !== "object") return "";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const n = node as any;
+
+  if (n.type === "text" && typeof n.text === "string") return n.text;
+  if (n.type === "hardBreak") return "\n";
+
+  const childText: string = Array.isArray(n.content)
+    ? n.content.map((c: unknown) => adfToPlainText(c)).join("")
+    : "";
+
+  switch (n.type) {
+    case "paragraph":
+    case "heading":
+      return childText + "\n\n";
+    case "listItem":
+      return "- " + childText.trim() + "\n";
+    case "bulletList":
+    case "orderedList":
+    case "blockquote":
+    case "codeBlock":
+      return childText + "\n";
+    case "mention":
+      return n.attrs?.text ? `@${n.attrs.text}` : "@unknown";
+    case "inlineCard":
+    case "link":
+      return n.attrs?.url ?? childText;
+    default:
+      return childText;
+  }
 }
