@@ -14,6 +14,9 @@ import * as commands from "./commands.js";
 import * as claude from "./claude.js";
 import * as ui from "./ui.js";
 import * as runtimeState from "./runtime-state.js";
+import * as scheduler from "./scheduler.js";
+import * as digest from "./digest.js";
+import * as jira from "./jira.js";
 
 // ============================================================================
 // Bot Class
@@ -247,11 +250,30 @@ export class ClaudineBot {
     } else {
       console.log(`Same git SHA as last run (${git.shortSha}); skipping startup message.`);
     }
+
+    // Proactive Jira digest. Skipped silently if Jira isn't configured.
+    if (jira.isConfigured()) {
+      const intervalEnv = Number(process.env.DIGEST_INTERVAL_MINUTES);
+      const intervalMinutes = Number.isFinite(intervalEnv) && intervalEnv > 0 ? intervalEnv : 30;
+      scheduler.start(intervalMinutes, [
+        {
+          name: "jira-digest",
+          run: async () => {
+            for (const chatId of this.config.allowedChatIds) {
+              await digest.runDigest(this.adapter, chatId, false);
+            }
+          },
+        },
+      ]);
+    } else {
+      console.log("[scheduler] Jira not configured; digest scheduler not started.");
+    }
   }
 
   /** Stop the bot */
   stop(): void {
     console.log("Shutting down...");
+    scheduler.stop();
     this.adapter.stop();
   }
 

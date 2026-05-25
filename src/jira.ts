@@ -1,0 +1,157 @@
+/**
+ * Claudine Bot - Jira REST client
+ *
+ * Tiny wrapper around the Atlassian Cloud REST API. Auth is HTTP Basic with
+ * (email : api_token); generate a token at:
+ *   https://id.atlassian.com/manage-profile/security/api-tokens
+ *
+ * Config comes from environment variables (validated in isConfigured()):
+ *   JIRA_SITE       e.g. onit-team.atlassian.net
+ *   JIRA_EMAIL      Atlassian login email
+ *   JIRA_API_TOKEN  the token
+ *
+ * No external deps — uses Node's built-in https module.
+ */
+
+import * as https from "https";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface JiraIssue {
+  key: string;
+  summary: string;
+  statusName: string;
+  statusCategory: string;
+  priority?: string;
+  updated: string;
+  url: string;
+  projectKey: string;
+}
+
+// ============================================================================
+// Config
+// ============================================================================
+
+interface Config {
+  site: string;
+  email: string;
+  token: string;
+}
+
+function readConfig(): Config | null {
+  const site = process.env.JIRA_SITE?.trim();
+  const email = process.env.JIRA_EMAIL?.trim();
+  const token = process.env.JIRA_API_TOKEN?.trim();
+  if (!site || !email || !token) return null;
+  return { site, email, token };
+}
+
+export function isConfigured(): boolean {
+  return readConfig() !== null;
+}
+
+// ============================================================================
+// HTTP
+// ============================================================================
+
+function request<T = unknown>(
+  cfg: Config,
+  pathAndQuery: string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const authHeader =
+      "Basic " + Buffer.from(`${cfg.email}:${cfg.token}`).toString("base64");
+
+    const req = https.request(
+      {
+        hostname: cfg.site,
+        path: pathAndQuery,
+        method: "GET",
+        headers: {
+          "Authorization": authHeader,
+          "Accept": "application/json",
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(data));
+            } catch (err) {
+              reject(new Error(`Failed to parse Jira response: ${err}`));
+            }
+          } else {
+            reject(new Error(`Jira API ${res.statusCode}: ${data.slice(0, 200)}`));
+          }
+        });
+      },
+    );
+
+    req.on("error", reject);
+    req.setTimeout(15000, () => {
+      req.destroy();
+      reject(new Error("Jira API request timeout"));
+    });
+    req.end();
+  });
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
+
+interface SearchResponse {
+  issues?: RawIssue[];
+}
+
+interface RawIssue {
+  key: string;
+  fields: {
+    summary?: string;
+    status?: { name?: string; statusCategory?: { name?: string } };
+    priority?: { name?: string };
+    updated?: string;
+    project?: { key?: string };
+  };
+}
+
+/** Run a JQL search. Returns the parsed issues in a stable shape. */
+export async function searchByJQL(
+  jql: string,
+  fields: string[] = ["summary", "status", "priority", "updated", "project"],
+  maxResults = 50,
+): Promise<JiraIssue[]> {
+  const cfg = readConfig();
+  if (!cfg) throw new Error("Jira not configured (missing JIRA_SITE / JIRA_EMAIL / JIRA_API_TOKEN)");
+
+  const params = new URLSearchParams({
+    jql,
+    fields: fields.join(","),
+    maxResults: String(maxResults),
+  });
+
+  const data = await request<SearchResponse>(cfg, `/rest/api/3/search/jql?${params}`);
+  const rawIssues = data.issues ?? [];
+
+  return rawIssues.map((it) => ({
+    key: it.key,
+    summary: it.fields.summary ?? "",
+    statusName: it.fields.status?.name ?? "Unknown",
+    statusCategory: it.fields.status?.statusCategory?.name ?? "Unknown",
+    priority: it.fields.priority?.name,
+    updated: it.fields.updated ?? "",
+    url: `https://${cfg.site}/browse/${it.key}`,
+    projectKey: it.fields.project?.key ?? "",
+  }));
+}
+
+/** Sanity check: returns the authenticated user, or throws. */
+export async function getCurrentUser(): Promise<{ accountId: string; emailAddress: string; displayName: string }> {
+  const cfg = readConfig();
+  if (!cfg) throw new Error("Jira not configured");
+  return request<{ accountId: string; emailAddress: string; displayName: string }>(cfg, "/rest/api/3/myself");
+}

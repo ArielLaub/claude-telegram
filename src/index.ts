@@ -84,6 +84,12 @@ process.on("SIGTERM", () => {
   process.exit(0);
 });
 
+process.on("SIGHUP", () => {
+  stopCollector();
+  bot.stop();
+  process.exit(0);
+});
+
 // Prevent crashes from unhandled errors
 process.on("uncaughtException", (err) => {
   console.error("Uncaught exception:", err);

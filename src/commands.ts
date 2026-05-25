@@ -17,6 +17,7 @@ import * as queue from "./queue.js";
 import * as ui from "./ui.js";
 import * as projects from "./projects.js";
 import * as agents from "./agents.js";
+import * as digest from "./digest.js";
 import { getHistogramData } from "./stats-collector.js";
 
 const execAsync = promisify(exec);
@@ -446,6 +447,11 @@ export async function handleAgents(adapter: PlatformAdapter, chatId: string): Pr
 
   message += "\nUse <code>/agent &lt;name&gt;</code> to pin one.";
   await ui.sendMessage(adapter, chatId, message);
+  return true;
+}
+
+export async function handleDigest(adapter: PlatformAdapter, chatId: string): Promise<boolean> {
+  await digest.showFullQueue(adapter, chatId);
   return true;
 }
 
@@ -931,6 +937,8 @@ export async function routeCommand(
       return handleAgents(adapter, chatId);
     case "/agent":
       return handleAgent(adapter, chatId, args);
+    case "/digest":
+      return handleDigest(adapter, chatId);
     case "/restart":
       return handleRestart(adapter, chatId);
     default:
